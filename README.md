@@ -22,6 +22,7 @@ Phần lõi nằm trong `core/` (Java thuần, không phụ thuộc Android, có
    Nếu Studio báo thiếu Gradle wrapper, chọn *Use Gradle wrapper* / để Studio tự tạo (Gradle 8.10.2).
 2. **Thêm model embedding** vào `app/src/main/assets/face_embedder.tflite`:
    - EdgeFace (khuyến nghị): chạy `tools/convert_edgeface_to_tflite.py` (cần `torch`, `ai-edge-torch`).
+     Trên Windows (`ai-edge-torch` không hỗ trợ), dùng `tools/convert_edgeface_to_tflite_windows.py` (qua ONNX + `onnx2tf`).
    - Hoặc bất kỳ model nhận dạng mặt TFLite **float32** nào, input `[1,H,W,3]` hoặc `[1,3,H,W]`.
      App tự đọc kích thước input/output. Nhớ chỉnh `Config.INPUT_MEAN/INPUT_STD` theo model
      (EdgeFace/ArcFace: 127.5/127.5; MobileFaceNet: 127.5/128).
