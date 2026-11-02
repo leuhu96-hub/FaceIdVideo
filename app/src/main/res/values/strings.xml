@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Face ID Video</string>
+    <string name="pick">Chọn video</string>
+    <string name="only_selected">Chỉ hiện người đã chọn</string>
+    <string name="merge">Gộp…</string>
+    <string name="merge_cancel">Huỷ gộp</string>
+    <string name="hint_pick">Chọn một video để bắt đầu phân tích khuôn mặt.</string>
+    <string name="analyzing">Đang phân tích…</string>
+    <string name="analyzing_progress">Đang phân tích %1$d%% · %2$d khung · %3$d khuôn mặt</string>
+    <string name="error">Lỗi: %1$s</string>
+    <string name="no_model">Chế độ chỉ tracking (không re-ID): %1$s</string>
+    <string name="threshold_label">Ngưỡng gom nhóm (cosine): %1$.2f — cao hơn = tách người chặt hơn</string>
+    <string name="done_info">%1$d người · %2$d track · %3$d khung đã phân tích. Chạm vào khuôn mặt để chọn.</string>
+    <string name="selected_info">ID %1$d: xuất hiện %2$d đoạn, tổng %3$.1fs. Chạm timeline để tua.</string>
+    <string name="merge_hint">Chạm vào người cần gộp vào ID %1$d</string>
+    <string name="merged">Đã gộp ID %1$d vào ID %2$d</string>
+</resources>
