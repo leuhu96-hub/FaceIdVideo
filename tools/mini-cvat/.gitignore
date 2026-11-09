@@ -1,0 +1,20 @@
+# model (tải riêng, không commit)
+*.onnx
+
+# kết quả chạy script
+gt_report/
+res/
+raw*.txt
+*_model_eval.csv
+
+# dữ liệu khuôn mặt thật: không commit
+data/
+videos/
+*.mp4
+*.mov
+*.mkv
+
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db

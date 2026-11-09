@@ -1,0 +1,6 @@
+numpy
+opencv-python
+onnxruntime
+scipy
+matplotlib
+scikit-image  # chỉ cần cho make_test_video.py

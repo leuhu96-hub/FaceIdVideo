@@ -1,0 +1,1375 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mini CVAT Video – Gán nhãn video</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+:root{--bg:#121418;--panel:#1b1e24;--panel2:#242832;--line:#313642;--text:#e6e8ec;--muted:#8b93a1;--acc:#4dabf7;--acc2:#1c7ed6;--warn:#fcc419}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:13px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+button,select,input{font:inherit;color:inherit}
+#app{display:grid;grid-template-rows:48px 1fr 100px;grid-template-columns:52px 1fr 310px;grid-template-areas:"top top top" "tools stage side" "tl tl side";height:100vh;height:100dvh}
+header{grid-area:top;display:flex;align-items:center;gap:6px;padding:0 10px;background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto;white-space:nowrap;scrollbar-width:none}
+header::-webkit-scrollbar{display:none}
+.logo{font-weight:700;margin-right:6px;display:flex;align-items:center;gap:6px}
+.logo i{width:18px;height:14px;border:2px solid var(--acc);border-radius:3px;display:inline-block;position:relative}
+.logo i:after{content:"";position:absolute;left:4px;top:1px;border-left:6px solid var(--acc);border-top:4px solid transparent;border-bottom:4px solid transparent}
+.sep{width:1px;height:24px;background:var(--line);margin:0 4px;flex:none}
+.btn{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer;flex:none;line-height:1.3}
+.btn:hover{border-color:#4a5262}
+.btn.primary{background:var(--acc2);border-color:var(--acc2)}
+.btn:disabled{opacity:.4;cursor:default}
+.btn.icon{padding:5px 8px;min-width:32px}
+.btn.on{background:rgba(77,171,247,.18);border-color:var(--acc)}
+select.btn{padding:4px 6px}
+.mut{color:var(--muted)}
+#fname{color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis}
+input.num{width:58px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:4px 6px}
+label.chk{display:flex;align-items:center;gap:4px;color:var(--muted);cursor:pointer;flex:none}
+#tools{grid-area:tools;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px 0}
+.tool{width:40px;height:40px;border-radius:8px;border:1px solid transparent;background:transparent;display:grid;place-items:center;cursor:pointer;color:var(--muted)}
+.tool:hover{background:var(--panel2);color:var(--text)}
+.tool.on{background:var(--acc2);color:#fff}
+.tool svg{width:22px;height:22px}
+#tools .gap{flex:1}
+#stage{grid-area:stage;position:relative;overflow:hidden;background:repeating-conic-gradient(#16191e 0 25%,#13151a 0 50%) 0 0/24px 24px}
+#cv{position:absolute;left:0;top:0;touch-action:none;display:block}
+#status{position:absolute;left:8px;bottom:8px;background:rgba(0,0,0,.55);padding:3px 8px;border-radius:4px;color:#cfd3da;font-size:12px;pointer-events:none;font-variant-numeric:tabular-nums}
+#hint{position:absolute;left:50%;top:8px;transform:translateX(-50%);background:rgba(0,0,0,.6);padding:4px 10px;border-radius:4px;font-size:12px;color:#cfd3da;pointer-events:none;white-space:nowrap;max-width:96%;overflow:hidden;text-overflow:ellipsis}
+#empty{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:var(--muted);padding:12px}
+#empty[hidden]{display:none}
+#empty .box{border:2px dashed var(--line);border-radius:14px;padding:28px 24px;max-width:440px;background:rgba(20,22,26,.85)}
+#empty h2{color:var(--text);margin:0 0 6px;font-size:18px}
+#empty .row{display:flex;gap:8px;justify-content:center;margin-top:14px;flex-wrap:wrap}
+#stage.drop:after{content:"Thả video để mở";position:absolute;inset:10px;border:3px dashed var(--acc);border-radius:12px;display:grid;place-items:center;font-size:20px;background:rgba(77,171,247,.08)}
+#loading{position:absolute;inset:0;display:none;place-items:center;background:rgba(0,0,0,.45);font-size:14px}
+#loading.show{display:grid}
+#tlWrap{grid-area:tl;background:var(--panel);border-top:1px solid var(--line);display:flex;flex-direction:column;min-width:0}
+#ctrl{display:flex;align-items:center;gap:5px;padding:6px 8px;overflow-x:auto;white-space:nowrap;scrollbar-width:none}
+#ctrl::-webkit-scrollbar{display:none}
+#ctrl .btn{padding:3px 8px}
+#timeTxt{font-variant-numeric:tabular-nums;color:var(--muted);min-width:110px}
+#tl{flex:1;width:100%;display:block;cursor:pointer;touch-action:none;min-height:0}
+#side{grid-area:side;background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.sec{padding:10px 12px;border-bottom:1px solid var(--line)}
+.sec h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);display:flex;justify-content:space-between;align-items:center}
+#labels{display:flex;flex-direction:column;gap:3px;max-height:28vh;overflow:auto}
+.lab{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:6px;cursor:pointer;border:1px solid transparent}
+.lab:hover{background:var(--panel2)}
+.lab.on{border-color:var(--acc);background:rgba(77,171,247,.08)}
+.lab input[type=color]{width:20px;height:20px;border:none;padding:0;background:none;cursor:pointer;flex:none}
+.lab .k{color:var(--muted);font-size:11px;width:12px}
+.lab .nm{flex:1;overflow:hidden;text-overflow:ellipsis}
+.lab .cnt{color:var(--muted);font-size:11px}
+.x{background:none;border:none;color:var(--muted);cursor:pointer;padding:2px 4px;border-radius:4px;flex:none}
+.x:hover{color:var(--text);background:var(--line)}
+.x.act{color:var(--warn)}
+.addrow{display:flex;gap:6px;margin-top:8px}
+.addrow input{flex:1;min-width:0;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:5px 8px}
+#objsWrap{flex:1;min-height:0;display:flex;flex-direction:column}
+#objs{flex:1;overflow:auto;padding:0 8px 8px}
+.obj{display:flex;align-items:center;gap:4px;padding:5px 4px 5px 6px;border-radius:6px;border:1px solid transparent;cursor:pointer}
+.obj:hover{background:var(--panel2)}
+.obj.on{border-color:var(--acc);background:rgba(77,171,247,.1)}
+.obj .dot{width:10px;height:10px;border-radius:2px;flex:none}
+.obj .id{color:var(--muted);width:32px;font-variant-numeric:tabular-nums;flex:none}
+.obj .ty{font-size:11px;color:var(--muted);width:40px;flex:none}
+.obj select{flex:1;min-width:64px;background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:2px 4px}
+.obj.off{opacity:.45}
+.obj.hid .ty{text-decoration:line-through}
+.bgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.bgrid label{display:flex;flex-direction:column;gap:2px;color:var(--muted);font-size:11px}
+.bgrid input{width:100%;min-width:0;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:4px 6px;font-variant-numeric:tabular-nums}
+.note2{color:var(--muted);font-size:11px;margin-top:6px}
+.empty{color:var(--muted);padding:10px 4px;font-size:12px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;flex:none}
+.seg button{background:var(--panel2);border:none;padding:5px 9px;cursor:pointer;color:var(--muted)}
+.seg button.on{background:var(--acc2);color:#fff}
+#modalBg{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;place-items:center;z-index:20;padding:12px}
+#modalBg.show{display:grid}
+#modal{background:var(--panel);border:1px solid var(--line);border-radius:10px;width:min(700px,100%);max-height:90vh;display:flex;flex-direction:column}
+#modal .mh{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line);font-weight:600}
+#modal .mb{padding:12px 14px;overflow:auto;display:flex;flex-direction:column;gap:10px}
+#modal textarea{width:100%;height:260px;background:#0f1114;border:1px solid var(--line);border-radius:6px;color:#cfe3ff;font:12px/1.4 ui-monospace,Consolas,monospace;padding:8px;resize:vertical}
+#modal .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+#modal .note{color:var(--muted);font-size:12px}
+table.keys{border-collapse:collapse;width:100%}
+table.keys td{padding:4px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+kbd{background:var(--panel2);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;font:11px ui-monospace,monospace;white-space:nowrap}
+#toast{position:fixed;left:50%;bottom:120px;transform:translateX(-50%);background:#2b303b;border:1px solid var(--line);padding:8px 14px;border-radius:8px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:30;max-width:90vw;text-align:center}
+#toast.show{opacity:1}
+#sideBtn{display:none}
+#modal.wide{width:min(1060px,100%)}
+.gtcfg{display:flex;flex-direction:column;gap:8px}.gtcfg>label{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.gtth{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px;margin-top:6px}.gtth label{display:flex;align-items:center;gap:4px;color:var(--muted);font-size:12px}
+.pbar{height:6px;background:var(--panel2);border-radius:3px;overflow:hidden;margin:4px 0}.pbar i{display:block;height:100%;width:0;background:var(--acc)}
+.gtbox{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 12px}.gtbox ul{margin:6px 0 8px;padding-left:18px}.gtbox code,#mBody code{background:#0f1114;padding:1px 5px;border-radius:4px}
+#mBody a{color:var(--acc)}#mBody h4{margin:16px 0 4px;font-size:13px;color:var(--acc)}
+.gtt{overflow:auto;max-height:340px}.gtt table{border-collapse:collapse;width:100%;font-size:12px}.gtt th{position:sticky;top:0;background:var(--panel2);text-align:left}
+.gtt td,.gtt th{padding:4px 6px;border-bottom:1px solid var(--line);vertical-align:top}tr.gti{cursor:pointer}tr.gti:hover{background:rgba(77,171,247,.12)}
+tr.gA td:first-child{border-left:3px solid #fcc419}tr.gQ td:first-child{border-left:3px solid #ff6b6b}tr.gB td:first-child{border-left:3px solid #20c997}tr.gC td:first-child{border-left:3px solid #cc5de8}
+.gtcharts{display:flex;flex-wrap:wrap;gap:10px}.hist{width:300px;max-width:100%;background:#15171c;border-radius:6px}.ht{font-size:10px;fill:#cfd3da}.hx{font-size:9px;fill:#8b93a1}
+.gtthumbs{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px}.gtthumbs figure{margin:0;font-size:10px;text-align:center;color:var(--muted)}.gtthumbs img{width:56px;height:56px;border-radius:4px;display:block}
+.gtpairs{display:flex;flex-direction:column;gap:6px}.gtpairs div{display:flex;gap:6px;align-items:center;font-size:12px}.gtpairs img{width:64px;height:64px;border-radius:4px}
+#mdSide .mdrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;font-size:12px}#mdInfo{font-size:12px;line-height:1.5}
+#mdEval .gtnav{display:flex;align-items:center;gap:6px;margin:6px 0}#mdEval .gtnav span{flex:1;text-align:center;color:var(--muted)}#mdEval .gtdesc{font-size:12px;line-height:1.45}
+.evk{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:6px;margin:8px 0}.evk div{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 8px}.evk b{display:block;font-size:18px}.evk span{font-size:11px;color:var(--muted)}
+#gtSide .gtnav{display:flex;align-items:center;gap:6px;margin-bottom:6px}#gtSide .gtnav span{flex:1;text-align:center;color:var(--muted)}#gtSide .gtdesc{font-size:12px;line-height:1.45}
+@media (max-width:820px){
+ #app{grid-template-columns:48px 1fr;grid-template-areas:"top top" "tools stage" "tl tl"}
+ #side{position:fixed;right:0;top:48px;bottom:100px;width:min(310px,88vw);z-index:10;transform:translateX(100%);transition:transform .2s}
+ #side.open{transform:none;box-shadow:-8px 0 24px rgba(0,0,0,.4)}
+ #sideBtn{display:inline-block}
+ .tool{width:38px;height:38px}
+ #fname{display:none}
+}
+</style>
+</head>
+<body>
+<div id="app">
+ <header>
+  <div class="logo"><i></i>Mini CVAT Video</div>
+  <button class="btn primary" id="openBtn">Mở video</button>
+  <button class="btn" id="demoBtn">Video mẫu</button>
+  <span id="fname"></span>
+  <span class="sep"></span>
+  <span class="mut">FPS</span><input class="num" id="fpsIn" type="number" min="1" max="240" step="0.001" value="30" title="Số khung hình/giây dùng để chia frame">
+  <span class="sep"></span>
+  <span class="mut">Nhãn</span><select class="btn" id="curLabelSel"></select>
+  <div class="seg" title="Track: đối tượng tồn tại qua nhiều frame (nội suy giữa keyframe). Shape: chỉ ở frame hiện tại."><button data-mode="track" class="on">Track</button><button data-mode="shape">Shape</button></div>
+  <span class="sep"></span>
+  <button class="btn icon" id="undoBtn" title="Hoàn tác (Ctrl+Z)">↶</button>
+  <button class="btn icon" id="redoBtn" title="Làm lại (Ctrl+Y)">↷</button>
+  <label class="chk"><input type="checkbox" id="showTags" checked>Tên nhãn</label>
+  <span class="sep"></span>
+  <button class="btn" id="importBtn">Nhập</button>
+  <button class="btn" id="exportBtn">Xuất</button>
+  <button class="btn" id="gtBtn" title="Đánh giá chất lượng ground truth">Đánh giá GT</button>
+  <button class="btn icon" id="helpBtn" title="Phím tắt">?</button>
+  <button class="btn" id="sideBtn">☰ Đối tượng</button>
+  <input type="file" id="fileIn" accept="video/*,.mp4,.webm,.mov,.mkv" hidden>
+  <input type="file" id="annIn" accept=".json,.jsonl,.xml,.zip,.txt" hidden>
+  <input type="file" id="gtSfIn" accept=".onnx" hidden>
+  <input type="file" id="mdIn" accept=".txt,.csv,.xml,.jsonl,.json" hidden>
+ </header>
+
+ <nav id="tools">
+  <button class="tool on" data-tool="select" title="Chọn / chỉnh sửa (S)"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 3l14 8-6.2 1.8L10 19z"/></svg></button>
+  <button class="tool" data-tool="rect" title="Bounding box (R)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="6" width="16" height="12" rx="1"/></svg></button>
+  <button class="tool" data-tool="polygon" title="Polygon (P)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M5 8l7-5 8 6-3 11H7z"/></svg></button>
+  <button class="tool" data-tool="point" title="Điểm (T)"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="4"/></svg></button>
+  <div class="gap"></div>
+  <button class="tool" id="zoomIn" title="Phóng to (+)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21M10.5 7.5v6M7.5 10.5h6"/></svg></button>
+  <button class="tool" id="zoomOut" title="Thu nhỏ (-)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21M7.5 10.5h6"/></svg></button>
+  <button class="tool" id="fitBtn" title="Vừa khung (0)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+ </nav>
+
+ <main id="stage">
+  <canvas id="cv"></canvas>
+  <div id="hint" hidden></div>
+  <div id="status" hidden></div>
+  <div id="empty"><div class="box">
+   <h2>Chưa có video</h2>
+   <div>Kéo thả video vào đây hoặc bấm “Mở video” (MP4 H.264 / WebM). Có thể thử ngay với video mẫu.</div>
+   <div class="row"><button class="btn primary" id="openBtn2">Mở video</button><button class="btn" id="demoBtn2">Video mẫu</button></div>
+  </div></div>
+  <div id="loading">Đang đọc video…</div>
+ </main>
+
+ <section id="tlWrap">
+  <div id="ctrl">
+   <button class="btn" id="bStart" title="Frame đầu (Home)">⏮</button>
+   <button class="btn" id="bBack10" title="Lùi 10 frame (Shift+D)">−10</button>
+   <button class="btn" id="bPrev" title="Frame trước (D)">◀</button>
+   <button class="btn primary" id="bPlay" title="Phát / dừng (Space)">▶</button>
+   <button class="btn" id="bNext" title="Frame sau (F)">▶|</button>
+   <button class="btn" id="bFwd10" title="Tiến 10 frame (Shift+F)">+10</button>
+   <button class="btn" id="bEnd" title="Frame cuối (End)">⏭</button>
+   <span class="mut">Frame</span><input class="num" id="frameIn" type="number" min="0" value="0"><span class="mut" id="frameTot">/ 0</span>
+   <span id="timeTxt">00:00.000</span>
+   <span class="sep"></span>
+   <button class="btn" id="bKPrev" title="Keyframe trước của đối tượng đang chọn (Q)">◆◀</button>
+   <button class="btn" id="bKey" title="Bật/tắt keyframe tại frame này (K)">◆ Keyframe</button>
+   <button class="btn" id="bKNext" title="Keyframe sau (E)">▶◆</button>
+   <button class="btn" id="bOut" title="Outside: đối tượng biến mất từ frame này (O)">⊘ Outside</button>
+  </div>
+  <canvas id="tl"></canvas>
+ </section>
+
+ <aside id="side">
+  <div class="sec">
+   <h3>Nhãn <span style="text-transform:none;letter-spacing:0">phím 1–9</span></h3>
+   <div id="labels"></div>
+   <form class="addrow" id="addLabelForm"><input id="newLabel" placeholder="Tên nhãn mới…" maxlength="40"><button class="btn">Thêm</button></form>
+  </div>
+  <div class="sec" id="boxEd" hidden>
+   <h3>Kích thước box <span id="boxEdId" style="text-transform:none;letter-spacing:0"></span></h3>
+   <div class="bgrid"><label>X<input type="number" data-k="x" step="1"></label><label>Y<input type="number" data-k="y" step="1"></label><label>W<input type="number" data-k="w" step="1" min="1"></label><label>H<input type="number" data-k="h" step="1" min="1"></label></div>
+   <div class="note2">Kéo góc/cạnh để resize · Shift giữ tỉ lệ · Alt+mũi tên đổi W/H</div>
+  </div>
+  <div class="sec" id="mdSide">
+   <h3>Box model <span style="text-transform:none;letter-spacing:0">phím B</span></h3>
+   <div class="mdrow"><label class="chk"><input type="checkbox" id="mdShow" checked>Hiện</label><label class="chk" title="Một bản video ẩn chạy trước đầu phát và detect các frame sắp tới, để box khớp đúng frame khi play"><input type="checkbox" id="mdLive">Tự chạy YuNet (tính trước)</label></div>
+   <div class="mdrow"><span class="mut">Score ≥</span><input type="range" id="mdThr" min="0.3" max="0.95" step="0.05" value="0.5" style="flex:1"><span id="mdThrO">0.50</span></div>
+   <div class="mdrow"><button class="btn" id="mdRun">Chạy frame này</button><button class="btn" id="mdFile">Nhập kết quả…</button><button class="btn" id="mdClear" title="Xóa box model">✕</button></div>
+   <div class="mdrow"><button class="btn" id="mdAdd" title="Biến box model chưa có nhãn ở frame này thành track GT">Thêm box chưa có nhãn → GT</button></div>
+   <div class="mdrow"><button class="btn primary" id="mdEvalBtn" title="Tính P/R/F1/AP cả video, so box model với GT">Đánh giá model so với GT…</button></div>
+   <div class="gtdesc" id="mdInfo"></div>
+   <div id="mdEval" hidden><div class="gtnav"><button class="btn icon" id="evPrev" title="Đoạn lỗi trước (,)">◀</button><span>–</span><button class="btn icon" id="evNext" title="Đoạn lỗi sau (.)">▶</button><button class="btn" id="evOpen">Kết quả</button></div><div class="gtdesc"></div></div>
+  </div>
+  <div class="sec" id="gtSide" hidden>
+   <h3>Nghi vấn GT <span style="text-transform:none;letter-spacing:0">phím [ ]</span></h3>
+   <div class="gtnav"><button class="btn icon" id="gtPrev" title="Nghi vấn trước ([)">◀</button><span>–</span><button class="btn icon" id="gtNext" title="Nghi vấn sau (])">▶</button><button class="btn" id="gtOpen">Báo cáo</button></div>
+   <div class="gtdesc"></div>
+  </div>
+  <div id="objsWrap">
+   <div class="sec" style="border:none;padding-bottom:4px"><h3>Đối tượng <span id="objCount">0</span></h3></div>
+   <div id="objs"></div>
+  </div>
+ </aside>
+</div>
+
+<div id="modalBg"><div id="modal"><div class="mh"><span id="mTitle"></span><button class="x" id="mClose">✕</button></div><div class="mb" id="mBody"></div></div></div>
+<div id="toast"></div>
+
+<script>
+(()=>{
+const $=s=>document.querySelector(s);
+const cv=$('#cv'),ctx=cv.getContext('2d'),stage=$('#stage'),tl=$('#tl'),tctx=tl.getContext('2d');
+const PALETTE=['#ff6b6b','#4dabf7','#51cf66','#fcc419','#cc5de8','#ff922b','#20c997','#f06595','#94d82d','#748ffc','#e64980','#15aabf'];
+const TYPE={rect:'Box',polygon:'Polygon',points:'Điểm'};
+const KEY='mini-cvat-video-v1',MIN=0.03,MAX=40;
+
+const S={labels:[{id:1,name:'person',color:'#ff6b6b'},{id:2,name:'car',color:'#4dabf7'},{id:3,name:'ball',color:'#fcc419'}],nextLabel:4,nextId:1,
+ tracks:[],frame:0,n:0,fps:30,w:0,h:0,name:'',duration:0};
+let store={videos:{}},src=null;
+let view={s:1,ox:0,oy:0},W=0,H=0,fitted=false;
+let hitR=10,tool='select',lastTool='rect',mode='track',curLabel=1,sel=null,draft=null,drag=null,mouse=null,playing=false;
+let undoSt=[],redoSt=[];
+
+/* ---------- utils ---------- */
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const dist=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);
+const mid=(a,b)=>[(a[0]+b[0])/2,(a[1]+b[1])/2];
+const r2=v=>Math.round(v*100)/100;
+const dpr=()=>window.devicePixelRatio||1;
+const clone=o=>JSON.parse(JSON.stringify(o));
+const labelOf=id=>S.labels.find(l=>l.id===id);
+const lname=id=>labelOf(id)?.name||'unknown';
+const lcolor=id=>labelOf(id)?.color||'#aaaaaa';
+const selTrack=()=>S.tracks.find(t=>t.id===sel);
+const toS=p=>[p[0]*view.s+view.ox,p[1]*view.s+view.oy];
+const toI=(x,y)=>[(x-view.ox)/view.s,(y-view.oy)/view.s];
+const clampI=p=>[clamp(p[0],0,S.w),clamp(p[1],0,S.h)];
+function bbox(P){let a=Infinity,b=Infinity,c=-Infinity,d=-Infinity;for(const p of P){a=Math.min(a,p[0]);b=Math.min(b,p[1]);c=Math.max(c,p[0]);d=Math.max(d,p[1])}return [a,b,c,d]}
+const norm=pts=>{const[a,b,c,d]=bbox(pts);return [[a,b],[c,d]]};
+function polyArea(P){let s=0;for(let i=0;i<P.length;i++){const a=P[i],b=P[(i+1)%P.length];s+=a[0]*b[1]-b[0]*a[1]}return Math.abs(s)/2}
+function pip(p,P){let c=false;for(let i=0,j=P.length-1;i<P.length;j=i++){const a=P[i],b=P[j];if((a[1]>p[1])!==(b[1]>p[1])&&p[0]<(b[0]-a[0])*(p[1]-a[1])/(b[1]-a[1])+a[0])c=!c}return c}
+function segDist(p,a,b){const dx=b[0]-a[0],dy=b[1]-a[1],l=dx*dx+dy*dy;let t=l?((p[0]-a[0])*dx+(p[1]-a[1])*dy)/l:0;t=clamp(t,0,1);return dist(p,[a[0]+t*dx,a[1]+t*dy])}
+function hexA(h,a){const n=parseInt(h.slice(1,7),16);return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`}
+function textOn(h){const n=parseInt(h.slice(1,7),16);return (0.299*(n>>16&255)+0.587*(n>>8&255)+0.114*(n&255))/255>0.62?'#111':'#fff'}
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let toastT;function toast(m,ms=2400){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),ms)}
+const evPos=(e,el=cv)=>{const r=el.getBoundingClientRect();return [e.clientX-r.left,e.clientY-r.top]};
+function fmtTime(sec){const m=Math.floor(sec/60),s=sec-m*60;return String(m).padStart(2,'0')+':'+s.toFixed(3).padStart(6,'0')}
+
+/* ---------- track model: keyframes + linear interpolation ---------- */
+const keys=t=>Object.keys(t.kf).map(Number).sort((a,b)=>a-b);
+function stateAt(t,f){
+ const ks=keys(t);let p=-1;for(const k of ks){if(k<=f)p=k;else break}
+ if(p<0)return null;const a=t.kf[p];if(a.outside)return null;
+ const nk=ks.find(k=>k>f);
+ if(p===f||nk===undefined)return {pts:a.pts,key:p===f};
+ const b=t.kf[nk];if(b.outside||b.pts.length!==a.pts.length)return {pts:a.pts,key:false};
+ const r=(f-p)/(nk-p);return {pts:a.pts.map((q,i)=>[q[0]+(b.pts[i][0]-q[0])*r,q[1]+(b.pts[i][1]-q[1])*r]),key:false};
+}
+function spans(t){const ks=keys(t),out=[];let st=null;for(const k of ks){const o=t.kf[k].outside;if(!o&&st===null)st=k;else if(o&&st!==null){out.push([st,k]);st=null}}if(st!==null)out.push([st,S.n]);return out}
+function ensureKey(t,f){if(!t.kf[f]||t.kf[f].outside){const s=stateAt(t,f);t.kf[f]={pts:clone(s.pts),outside:false}}return t.kf[f]}
+function visible(){const out=[];for(const t of S.tracks){if(t.hidden)continue;const s=stateAt(t,S.frame);if(s)out.push({t,pts:s.pts,key:s.key})}return out}
+function roundKf(k){k.pts=k.pts.map(q=>[r2(q[0]),r2(q[1])])}
+
+/* ---------- persistence ---------- */
+try{const d=JSON.parse(localStorage.getItem(KEY)||'null');if(d&&d.labels&&d.labels.length){S.labels=d.labels;S.nextLabel=d.nextLabel||S.labels.length+1;S.nextId=d.nextId||1;store.videos=d.videos||{}}}catch(e){}
+curLabel=S.labels[0]?.id;
+let pT;function persist(){clearTimeout(pT);pT=setTimeout(()=>{try{if(S.name&&src?.kind==='video')store.videos[S.name]={w:S.w,h:S.h,fps:S.fps,tracks:S.tracks};localStorage.setItem(KEY,JSON.stringify({labels:S.labels,nextLabel:S.nextLabel,nextId:S.nextId,videos:store.videos}))}catch(e){}},500)}
+
+/* ---------- undo ---------- */
+function pushUndo(){undoSt.push(JSON.stringify(S.tracks));if(undoSt.length>200)undoSt.shift();redoSt=[];updBtns()}
+function swap(a,b){const u=a.pop();if(u===undefined)return;b.push(JSON.stringify(S.tracks));S.tracks=JSON.parse(u);if(!selTrack())sel=null;draft=null;changed()}
+const undo=()=>swap(undoSt,redoSt),redo=()=>swap(redoSt,undoSt);
+function updBtns(){$('#undoBtn').disabled=!undoSt.length;$('#redoBtn').disabled=!redoSt.length}
+
+/* ---------- sizing & view ---------- */
+function resize(){const r=stage.getBoundingClientRect();W=r.width;H=r.height;cv.width=Math.round(W*dpr());cv.height=Math.round(H*dpr());cv.style.width=W+'px';cv.style.height=H+'px';if(fitted&&src)fit();else render();
+ tl.width=Math.round(tl.clientWidth*dpr());tl.height=Math.round(tl.clientHeight*dpr());drawTimeline()}
+new ResizeObserver(resize).observe(stage);new ResizeObserver(resize).observe(tl);
+function fit(){if(!src)return;fitted=true;const s=Math.min(W/S.w,H/S.h)*0.95;view.s=s;view.ox=(W-S.w*s)/2;view.oy=(H-S.h*s)/2;render();status()}
+function zoomAt(p,f){if(!src)return;fitted=false;const ns=clamp(view.s*f,MIN,MAX);f=ns/view.s;view.s=ns;view.ox=p[0]-(p[0]-view.ox)*f;view.oy=p[1]-(p[1]-view.oy)*f;render();status()}
+
+/* ---------- rendering ---------- */
+function handles(type,pts){if(type==='rect'){const[[a,b],[c,d]]=pts;return[[a,b],[c,b],[c,d],[a,d]]}if(type==='polygon')return pts;return []}
+function render(){
+ ctx.setTransform(dpr(),0,0,dpr(),0,0);ctx.clearRect(0,0,W,H);if(!src)return;
+ ctx.save();ctx.translate(view.ox,view.oy);ctx.scale(view.s,view.s);ctx.imageSmoothingEnabled=view.s<3;try{ctx.drawImage(src.image,0,0,S.w,S.h)}catch(e){}ctx.restore();
+ ctx.strokeStyle='rgba(255,255,255,.25)';ctx.lineWidth=1;ctx.strokeRect(view.ox-.5,view.oy-.5,S.w*view.s+1,S.h*view.s+1);
+ const vis=visible();let sv=null;
+ for(const v of vis){if(v.t.id===sel)sv=v;else drawShape(v,false)}
+ if(sv)drawShape(sv,true);
+ if(draft)drawDraft();
+ drawModel();if(MD.dets.size)updModelSide();
+ if(GT.hl&&GT.hl.f===S.frame){const b=GT.hl.box,[a0,b0]=toS([b.x,b.y]),[a1,b1]=toS([b.x+b.w,b.y+b.h]);ctx.save();ctx.setLineDash([6,4]);ctx.lineWidth=2.5;ctx.strokeStyle='#ff922b';ctx.strokeRect(a0,b0,a1-a0,b1-b0);
+  ctx.setLineDash([]);ctx.font='600 12px system-ui';const tx='model thấy mặt ở đây';ctx.fillStyle='#ff922b';ctx.fillRect(a0,b0-18,ctx.measureText(tx).width+8,17);ctx.fillStyle='#111';ctx.fillText(tx,a0+4,b0-5.5);ctx.restore()}
+ if(tool!=='select'&&mouse&&!drag&&!playing){const[x0,y0]=toS([0,0]),[x1,y1]=toS([S.w,S.h]);
+  if(mouse[0]>=x0&&mouse[0]<=x1&&mouse[1]>=y0&&mouse[1]<=y1){ctx.save();ctx.setLineDash([4,4]);ctx.strokeStyle='rgba(255,255,255,.45)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x0,mouse[1]+.5);ctx.lineTo(x1,mouse[1]+.5);ctx.moveTo(mouse[0]+.5,y0);ctx.lineTo(mouse[0]+.5,y1);ctx.stroke();ctx.restore()}}
+}
+function drawShape(v,act){
+ const t=v.t,c=lcolor(t.label),P=v.pts.map(toS);
+ ctx.lineWidth=act?2.5:1.6;ctx.strokeStyle=c;ctx.fillStyle=hexA(c,act?.28:.14);
+ if(t.type==='rect'){const[a,b]=P;ctx.beginPath();ctx.rect(a[0],a[1],b[0]-a[0],b[1]-a[1]);ctx.fill();ctx.stroke()}
+ else if(t.type==='polygon'){ctx.beginPath();P.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.closePath();ctx.fill();ctx.stroke()}
+ else for(const p of P){ctx.beginPath();ctx.arc(p[0],p[1],act?6.5:5,0,7);ctx.fillStyle=c;ctx.fill();ctx.lineWidth=act?2.5:1.5;ctx.strokeStyle='#fff';ctx.stroke()}
+ if($('#showTags').checked||act){const bb=bbox(P),txt=lname(t.label)+' #'+t.id+(v.key?' ◆':'')+(t.locked?' 🔒':'');
+  ctx.font='600 12px system-ui,sans-serif';const tw=ctx.measureText(txt).width+8;let ty=bb[1]-18;if(ty<0)ty=bb[3]+2;
+  ctx.fillStyle=c;ctx.fillRect(bb[0],ty,tw,17);ctx.fillStyle=textOn(c);ctx.fillText(txt,bb[0]+4,ty+12.5)}
+ if(act&&!t.locked&&!playing){const hs=hitR>12?6:4,H8=t.type==='rect'?rectHandles(v.pts):handles(t.type,v.pts);
+  const big=t.type!=='rect'||(Math.abs(P[1][0]-P[0][0])>28&&Math.abs(P[1][1]-P[0][1])>28);
+  H8.forEach((h,i)=>{if(i>=4&&!big)return;const q=toS(h);ctx.fillStyle=drag&&drag.mode==='handle'&&drag.i===i?c:'#fff';ctx.strokeStyle=c;ctx.lineWidth=1.5;
+   if(i>=4){ctx.beginPath();ctx.arc(q[0],q[1],hs,0,7);ctx.fill();ctx.stroke()}else{ctx.fillRect(q[0]-hs,q[1]-hs,hs*2,hs*2);ctx.strokeRect(q[0]-hs,q[1]-hs,hs*2,hs*2)}});
+  if(t.type==='rect'&&drag&&drag.mode==='handle'){const w=Math.round(v.pts[1][0]-v.pts[0][0]),h=Math.round(v.pts[1][1]-v.pts[0][1]);ctx.font='12px system-ui';const tx=w+'×'+h,tw=ctx.measureText(tx).width+8;ctx.fillStyle='rgba(0,0,0,.7)';ctx.fillRect(P[1][0]+6,P[1][1]+4,tw,17);ctx.fillStyle='#fff';ctx.fillText(tx,P[1][0]+10,P[1][1]+16.5)}}
+}
+function drawDraft(){
+ const c=lcolor(curLabel);ctx.strokeStyle=c;ctx.lineWidth=2;
+ if(draft.type==='rect'){const[a,b]=draft.pts.map(toS);ctx.save();ctx.setLineDash([6,4]);ctx.fillStyle=hexA(c,.15);ctx.beginPath();ctx.rect(a[0],a[1],b[0]-a[0],b[1]-a[1]);ctx.fill();ctx.stroke();ctx.restore();
+  ctx.font='12px system-ui';ctx.fillStyle='#fff';ctx.fillText(Math.round(Math.abs(draft.pts[1][0]-draft.pts[0][0]))+'×'+Math.round(Math.abs(draft.pts[1][1]-draft.pts[0][1])),Math.max(a[0],b[0])+6,Math.max(a[1],b[1])+14)}
+ else{const P=draft.pts.map(toS),hv=draft.hover?toS(draft.hover):null;
+  ctx.fillStyle=hexA(c,.12);ctx.beginPath();P.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));if(hv)ctx.lineTo(hv[0],hv[1]);ctx.fill();ctx.stroke();
+  P.forEach((p,i)=>{ctx.beginPath();ctx.arc(p[0],p[1],i===0?6:4,0,7);ctx.fillStyle=i===0&&P.length>=3&&hv&&dist(hv,p)<10?'#fff':c;ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=1.2;ctx.stroke()})}
+}
+function drawTimeline(){
+ const w=tl.clientWidth,h=tl.clientHeight;tctx.setTransform(dpr(),0,0,dpr(),0,0);tctx.clearRect(0,0,w,h);
+ tctx.fillStyle='#15171c';tctx.fillRect(0,0,w,h);if(!src||!S.n)return;
+ const X=f=>f/S.n*w;
+ // ticks
+ tctx.fillStyle='#2a2f3a';const step=Math.max(1,Math.pow(10,Math.ceil(Math.log10(S.n/10))));for(let f=0;f<S.n;f+=step){tctx.fillRect(Math.round(X(f)),0,1,h)}
+ tctx.fillStyle='#6b7383';tctx.font='10px system-ui';for(let f=0;f<S.n;f+=step*(w/(S.n/step)<40?5:1))tctx.fillText(f,X(f)+2,h-3);
+ const tr=S.tracks,rows=tr.length,avail=h-24,rh=rows?clamp(Math.floor(avail/rows)-1,2,8):0;
+ tr.forEach((t,i)=>{const y=4+i*(rh+1);if(y+rh>h-18)return;const c=lcolor(t.label);tctx.fillStyle=t.id===sel?c:hexA(c,t.hidden?.2:.55);
+  for(const[a,b]of spans(t))tctx.fillRect(X(a),y,Math.max(1,X(b)-X(a)),rh)});
+ const st=selTrack();
+ if(st){const y=h-16;for(const k of keys(st)){const x=X(k+.5),o=st.kf[k].outside;tctx.fillStyle=o?'#868e96':'#fff';tctx.beginPath();tctx.moveTo(x,y-5);tctx.lineTo(x+4,y);tctx.lineTo(x,y+5);tctx.lineTo(x-4,y);tctx.closePath();tctx.fill();if(o){tctx.strokeStyle='#ff6b6b';tctx.lineWidth=1;tctx.stroke()}}}
+ drawGTMarks(X,h);drawMDMarks(X,h);drawEVMarks(X,h);
+ const px=X(S.frame+.5);tctx.fillStyle='#ff6b6b';tctx.fillRect(px-1,0,2,h);tctx.beginPath();tctx.moveTo(px-5,0);tctx.lineTo(px+5,0);tctx.lineTo(px,6);tctx.fill();
+}
+function status(ip){const el=$('#status');if(!src){el.hidden=true;return}el.hidden=false;el.textContent=(ip?`x ${Math.round(ip[0])}, y ${Math.round(ip[1])}  |  `:'')+`${Math.round(view.s*100)}%  |  ${S.w}×${S.h}`}
+function hint(){const h=$('#hint'),m={rect:'Kéo để vẽ box',polygon:draft?'Chạm để thêm đỉnh · chạm đỉnh đầu / Enter / double-click để đóng':'Chạm để đặt đỉnh đầu tiên',point:'Chạm để đặt điểm'};
+ const txt=m[tool]?m[tool]+(mode==='track'?' · chế độ Track':' · chế độ Shape (chỉ frame này)'):'';h.hidden=!txt||!src||playing;h.textContent=txt}
+
+/* ---------- side panels ---------- */
+function renderLabels(){
+ const box=$('#labels'),cnt={};for(const t of S.tracks)cnt[t.label]=(cnt[t.label]||0)+1;box.innerHTML='';
+ S.labels.forEach((l,i)=>{const d=document.createElement('div');d.className='lab'+(l.id===curLabel?' on':'');
+  d.innerHTML=`<span class="k">${i<9?i+1:''}</span><input type="color" value="${l.color}"><span class="nm" title="Double-click để đổi tên">${esc(l.name)}</span><span class="cnt">${cnt[l.id]||0}</span><button class="x" title="Xóa nhãn">✕</button>`;
+  d.onclick=e=>{if(e.target.closest('input,button'))return;setCurLabel(l.id,false)};
+  d.querySelector('input').oninput=e=>{l.color=e.target.value;render();drawTimeline();persist()};
+  d.querySelector('input').onchange=()=>{renderLabels();renderObjects()};
+  d.querySelector('.nm').ondblclick=e=>{const inp=document.createElement('input');inp.value=l.name;inp.style.cssText='flex:1;min-width:0;background:#0f1114;border:1px solid var(--acc);border-radius:4px;padding:1px 4px';e.target.replaceWith(inp);inp.focus();inp.select();
+   inp.onblur=()=>{const v=inp.value.trim();if(v&&!S.labels.some(x=>x!==l&&x.name===v))l.name=v;renderLabels();renderObjects();render();persist()};inp.onkeydown=k=>{if(k.key==='Enter')inp.blur();if(k.key==='Escape'){inp.value=l.name;inp.blur()}}};
+  d.querySelector('button').onclick=()=>{if(cnt[l.id]){toast(`Nhãn “${l.name}” đang được dùng cho ${cnt[l.id]} đối tượng`);return}if(S.labels.length<=1){toast('Cần ít nhất một nhãn');return}
+   S.labels=S.labels.filter(x=>x!==l);if(curLabel===l.id)curLabel=S.labels[0].id;renderLabels();persist()};
+  box.appendChild(d)});
+ const s=$('#curLabelSel');s.innerHTML=S.labels.map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');s.value=curLabel;
+}
+function setCurLabel(id,applySel){curLabel=id;const t=selTrack();if(applySel&&t&&t.label!==id){pushUndo();t.label=id;changed()}renderLabels();render()}
+function renderObjects(){
+ const box=$('#objs');$('#objCount').textContent=S.tracks.length;box.innerHTML='';
+ if(!S.tracks.length){box.innerHTML='<div class="empty">'+(src?'Chưa có đối tượng. Chọn công cụ bên trái để vẽ. Ở chế độ Track, đối tượng tồn tại qua các frame sau; chỉnh vị trí ở frame khác sẽ tạo keyframe và phần giữa được nội suy.':'Mở video để bắt đầu.')+'</div>';return}
+ const opts=S.labels.map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');
+ for(const t of S.tracks){const st=stateAt(t,S.frame),isK=!!(t.kf[S.frame]&&!t.kf[S.frame].outside);
+  const d=document.createElement('div');d.className='obj'+(t.id===sel?' on':'')+(st?'':' off')+(t.hidden?' hid':'');
+  d.title=st?'':'Không xuất hiện ở frame này';
+  d.innerHTML=`<span class="dot" style="background:${lcolor(t.label)}"></span><span class="id">#${t.id}</span><span class="ty">${TYPE[t.type]}</span><select>${opts}</select>`+
+   `<button class="x${isK?' act':''}" data-a="k" title="Keyframe (K)">${isK?'◆':'◇'}</button><button class="x${st?'':' act'}" data-a="o" title="Outside (O)">⊘</button><button class="x" data-a="h" title="Ẩn/hiện (H)">${t.hidden?'○':'◉'}</button><button class="x" data-a="l" title="Khóa (L)">${t.locked?'🔒':'🔓'}</button><button class="x" data-a="d" title="Xóa cả track (Del)">✕</button>`;
+  const se=d.querySelector('select');se.value=t.label;se.onchange=()=>{pushUndo();t.label=+se.value;changed()};
+  d.onclick=e=>{if(e.target.closest('select'))return;const a=e.target.closest('button')?.dataset.a;sel=t.id;
+   if(a==='k')return toggleKey();if(a==='o')return toggleOutside();
+   if(a==='h'){t.hidden=!t.hidden;return changed()}if(a==='l'){t.locked=!t.locked;return changed()}if(a==='d')return delSel();
+   changed(false)};
+  box.appendChild(d);if(t.id===sel)requestAnimationFrame(()=>d.scrollIntoView({block:'nearest'}))}
+}
+function updFrameUI(){
+ $('#frameIn').value=S.frame;$('#frameTot').textContent='/ '+Math.max(0,S.n-1);$('#timeTxt').textContent=fmtTime(S.frame/S.fps);
+ const t=selTrack();$('#bKey').classList.toggle('on',!!(t&&t.kf[S.frame]&&!t.kf[S.frame].outside));$('#bOut').classList.toggle('on',!!(t&&!stateAt(t,S.frame)));
+ ['#bKey','#bOut','#bKPrev','#bKNext'].forEach(s=>$(s).disabled=!t);drawTimeline();updBoxEd();
+}
+function updBoxEd(){const ed=$('#boxEd'),t=selTrack(),s=t&&t.type==='rect'?stateAt(t,S.frame):null;ed.hidden=!s;if(!s)return;
+ $('#boxEdId').textContent='#'+t.id+(t.kf[S.frame]&&!t.kf[S.frame].outside?' ◆':' (nội suy)');const[[a,b],[c,d]]=s.pts,v={x:a,y:b,w:c-a,h:d-b};
+ ed.querySelectorAll('input').forEach(i=>{if(document.activeElement!==i)i.value=Math.round(v[i.dataset.k]*10)/10;i.disabled=t.locked})}
+function setBox(x,y,w,h){const t=selTrack();if(!t||t.locked||t.type!=='rect'||!stateAt(t,S.frame))return;w=clamp(w,1,S.w);h=clamp(h,1,S.h);x=clamp(x,0,S.w-w);y=clamp(y,0,S.h-h);
+ pushUndo();const k=ensureKey(t,S.frame);k.pts=[[x,y],[x+w,y+h]];roundKf(k);changed()}
+function resizeBy(dw,dh){const t=selTrack();if(!t||t.type!=='rect')return;const s=stateAt(t,S.frame);if(!s)return;const[[a,b],[c,d]]=s.pts;setBox(a,b,c-a+dw,d-b+dh)}
+function changed(save=true){updBoxEd();render();renderObjects();updFrameUI();updBtns();hint();if(save){renderLabels();persist()}}
+
+/* ---------- frame navigation (sequential seeking) ---------- */
+let seekBusy=false,seekWant=null;
+async function pump(){if(seekBusy)return;seekBusy=true;while(seekWant!==null){const f=seekWant;seekWant=null;await src.seek(f)}seekBusy=false;render();updModelSide();maybeDetect()}
+function goFrame(f){if(!src)return;if(playing)stopPlay();S.frame=clamp(Math.round(f),0,S.n-1);draft=null;updFrameUI();renderObjects();hint();seekWant=S.frame;pump()}
+let raf=0,pT0=0,pF0=0;
+function play(){if(!src||playing)return;if(S.frame>=S.n-1)S.frame=0;playing=true;draft=null;drag=null;$('#bPlay').textContent='⏸';hint();
+ if(src.kind==='video'){const v=src.v;src.pf=null;v.currentTime=(S.frame+.5)/S.fps;v.play().catch(()=>{stopPlay();toast('Không phát được video')});
+  // lấy đúng frame đang được trình chiếu (currentTime có thể lệch 1 frame so với hình) -> box và hình luôn khớp nhịp
+  if('requestVideoFrameCallback' in v){const onF=(now,meta)=>{if(!playing)return;src.pf=Math.floor(meta.mediaTime*S.fps+1e-3);v.requestVideoFrameCallback(onF)};v.requestVideoFrameCallback(onF)}}
+ pT0=performance.now();pF0=S.frame;raf=requestAnimationFrame(tick)}
+function tick(now){if(!playing)return;let f,end=false;
+ if(src.kind==='video'){f=src.pf??Math.floor(src.v.currentTime*S.fps+1e-6);end=src.v.ended}else{f=pF0+Math.floor((now-pT0)/1000*S.fps);src.seek(Math.min(f,S.n-1))}
+ if(f>=S.n-1){f=S.n-1;end=true}if(f!==S.frame){S.frame=f;updFrameUI();if(MD.live&&src.kind!=='video')maybeDetectOld()}render();
+ if(end){stopPlay();goFrame(S.frame);return}raf=requestAnimationFrame(tick)}
+function stopPlay(){playing=false;cancelAnimationFrame(raf);if(src?.kind==='video')src.v.pause();$('#bPlay').textContent='▶'}
+function togglePlay(){if(playing){stopPlay();goFrame(S.frame)}else play()}
+function jumpKey(dir){const t=selTrack();if(!t)return toast('Chọn một đối tượng trước');const ks=keys(t);const k=dir>0?ks.find(x=>x>S.frame):[...ks].reverse().find(x=>x<S.frame);if(k===undefined)return toast('Không còn keyframe');goFrame(k)}
+
+/* ---------- sources ---------- */
+function makeVideoSource(v){return{kind:'video',v,image:v,seek(f){return new Promise(res=>{const t=Math.min((f+.5)/S.fps,Math.max(0,v.duration-0.001));let done=false;const fin=()=>{if(done)return;done=true;v.removeEventListener('seeked',fin);res()};
+ if(Math.abs(v.currentTime-t)<1e-4&&v.readyState>=2)return fin();v.addEventListener('seeked',fin);v.currentTime=t;setTimeout(fin,4000)})}}}
+async function detectFps(v){
+ if(!('requestVideoFrameCallback' in HTMLVideoElement.prototype))return null;
+ return new Promise(res=>{const ts=[];let done=false;
+  const fin=()=>{if(done)return;done=true;v.pause();const d=[];for(let i=1;i<ts.length;i++){const x=ts[i]-ts[i-1];if(x>0.001)d.push(x)}d.sort((a,b)=>a-b);if(!d.length)return res(null);
+   const raw=1/d[Math.floor(d.length/2)];const common=[23.976,24,25,29.97,30,48,50,59.94,60,120];const near=common.find(c=>Math.abs(c-raw)/c<0.03);res(near||Math.round(raw*1000)/1000)};
+  const cb=(now,meta)=>{ts.push(meta.mediaTime);if(ts.length<14&&!done)v.requestVideoFrameCallback(cb);else fin()};
+  v.requestVideoFrameCallback(cb);v.play().catch(fin);setTimeout(fin,3000)})}
+async function openVideo(file){
+ if(playing)stopPlay();$('#loading').classList.add('show');
+ const v=document.createElement('video');v.muted=true;v.playsInline=true;v.preload='auto';v.src=URL.createObjectURL(file);
+ const ok=await new Promise(r=>{v.onloadeddata=()=>r(true);v.onerror=()=>r(false);setTimeout(()=>r(v.readyState>=2),15000)});
+ if(!ok){$('#loading').classList.remove('show');toast('Trình duyệt không đọc được video này — hãy thử MP4 (H.264) hoặc WebM',4000);return}
+ if(!isFinite(v.duration)){await new Promise(r=>{v.ondurationchange=()=>{if(isFinite(v.duration))r()};v.currentTime=1e101;setTimeout(r,5000)})}
+ const saved=store.videos[file.name],same=saved&&saved.w===v.videoWidth&&saved.h===v.videoHeight;
+ let fps=same?saved.fps:null;if(!fps){fps=await detectFps(v);if(!fps){fps=30;toast('Không tự nhận được FPS, đang dùng 30 — hãy sửa ô FPS nếu cần',4000)}}
+ $('#loading').classList.remove('show');
+ src=makeVideoSource(v);setup(file.name,v.videoWidth,v.videoHeight,fps,v.duration,same?saved.tracks:[]);
+ if(same&&saved.tracks.length)toast(`Đã khôi phục ${saved.tracks.length} đối tượng đã lưu cho video này`);
+}
+function openDemo(){
+ if(playing)stopPlay();const c=document.createElement('canvas');c.width=960;c.height=540;const g=c.getContext('2d');
+ const draw=t=>{const sky=g.createLinearGradient(0,0,0,300);sky.addColorStop(0,'#7fb3e6');sky.addColorStop(1,'#dfe9f2');g.fillStyle=sky;g.fillRect(0,0,960,320);
+  g.fillStyle='#6a8f4e';g.fillRect(0,320,960,220);g.fillStyle='#55585e';g.fillRect(0,390,960,100);g.fillStyle='#e8e2c8';for(let x=((-t*60)%90+90)%90-90;x<960;x+=90)g.fillRect(x+20,437,50,6);
+  for(const x of [140,470,800]){g.fillStyle='#6b4a2f';g.fillRect(x-8,240,16,85);g.fillStyle='#3f7d3a';g.beginPath();g.arc(x,225,50,0,7);g.fill()}
+  const car=(x,y,col,dir)=>{g.save();g.translate(x,y);if(dir<0)g.scale(-1,1);g.fillStyle=col;g.beginPath();g.roundRect(-100,-30,200,60,12);g.fill();g.fillRect(-55,-58,110,32);g.fillStyle='#9fd3ff';g.fillRect(-45,-52,40,24);g.fillRect(3,-52,42,24);g.fillStyle='#222';g.beginPath();g.arc(-55,30,18,0,7);g.arc(55,30,18,0,7);g.fill();g.restore()};
+  car(-150+t*120,420,'#d9480f',1);if(t>3)car(1150-(t-3)*150,465,'#1c7ed6',-1);
+  const px=880-t*55,sw=Math.sin(t*8)*8;g.fillStyle='#f1c9a5';g.beginPath();g.arc(px,282,14,0,7);g.fill();g.fillStyle='#364fc7';g.fillRect(px-14,297,28,46);g.fillStyle='#212529';g.fillRect(px-12+sw*.4,343,10,36);g.fillRect(px+2-sw*.4,343,10,36);
+  const bx=150+t*60,by=330-Math.abs(Math.sin(t*2.6))*170;g.fillStyle='#fcc419';g.beginPath();g.arc(bx,by,16,0,7);g.fill();g.strokeStyle='#e67700';g.lineWidth=2;g.stroke();
+  g.fillStyle='rgba(0,0,0,.5)';g.fillRect(8,8,120,24);g.fillStyle='#fff';g.font='14px monospace';g.fillText('t='+t.toFixed(2)+'s',16,25)};
+ src={kind:'demo',image:c,seek(f){draw(f/S.fps);return Promise.resolve()}};
+ setup('demo_video',960,540,30,10,[]);
+}
+function setup(name,w,h,fps,duration,tracks){
+ S.name=name;S.w=w;S.h=h;S.fps=fps;S.duration=duration;S.n=Math.max(1,Math.floor(duration*fps+1e-6));S.tracks=tracks;S.frame=0;
+ for(const t of tracks)S.nextId=Math.max(S.nextId,t.id+1);
+ undoSt=[];redoSt=[];sel=null;draft=null;$('#fpsIn').value=fps;$('#fname').textContent=name;$('#empty').hidden=true;$('#frameIn').max=S.n-1;
+ renderLabels();fit();goFrame(0);changed(false);
+}
+
+/* ---------- object ops ---------- */
+function addTrack(type,pts){pushUndo();const f=S.frame,P=pts.map(p=>[r2(p[0]),r2(p[1])]);
+ const t={id:S.nextId++,type,label:curLabel,kf:{[f]:{pts:P,outside:false}},hidden:false,locked:false};
+ if(mode==='shape'&&f+1<S.n)t.kf[f+1]={pts:clone(P),outside:true};S.tracks.push(t);sel=t.id;changed()}
+function finishPolygon(){if(draft&&draft.pts.length>=3){const p=draft.pts;draft=null;addTrack('polygon',p)}else toast('Polygon cần ít nhất 3 đỉnh')}
+function delSel(){const t=selTrack();if(!t)return;pushUndo();S.tracks=S.tracks.filter(x=>x!==t);sel=null;changed();toast('Đã xóa track #'+t.id)}
+function toggleKey(){const t=selTrack(),f=S.frame;if(!t)return;const k=t.kf[f];
+ if(k&&!k.outside){const vis=Object.values(t.kf).filter(x=>!x.outside).length;if(vis<=1)return toast('Đây là keyframe duy nhất — dùng Xóa nếu muốn bỏ đối tượng');pushUndo();delete t.kf[f]}
+ else{const s=stateAt(t,f);if(!s)return toast('Đối tượng không xuất hiện ở frame này — dùng Outside để hiện lại');pushUndo();t.kf[f]={pts:clone(s.pts),outside:false}}
+ changed()}
+function toggleOutside(){const t=selTrack(),f=S.frame;if(!t)return;const s=stateAt(t,f);pushUndo();
+ if(s){t.kf[f]={pts:clone(s.pts),outside:true};toast('#'+t.id+' biến mất từ frame '+f)}
+ else{const k=t.kf[f];if(k&&k.outside){delete t.kf[f];if(!stateAt(t,f)){const ks=keys(t),p=[...ks].reverse().find(x=>x<f&&!t.kf[x].outside)??ks.find(x=>!t.kf[x].outside);t.kf[f]={pts:clone(t.kf[p].pts),outside:false}}}
+  else{const ks=keys(t),p=[...ks].reverse().find(x=>x<f&&!t.kf[x].outside)??ks.find(x=>!t.kf[x].outside);t.kf[f]={pts:clone(t.kf[p].pts),outside:false}}
+  toast('#'+t.id+' xuất hiện lại từ frame '+f)}
+ changed()}
+function nudge(dx,dy){const t=selTrack();if(!t||t.locked)return;const s=stateAt(t,S.frame);if(!s)return;const b=bbox(s.pts);dx=clamp(dx,-b[0],S.w-b[2]);dy=clamp(dy,-b[1],S.h-b[3]);pushUndo();const k=ensureKey(t,S.frame);k.pts.forEach(p=>{p[0]+=dx;p[1]+=dy});roundKf(k);changed()}
+function hitShape(ip,p){let best=null,ba=Infinity;for(const v of visible()){let hit=false,a=0;
+ if(v.t.type==='rect'){const[[x1,y1],[x2,y2]]=v.pts;hit=ip[0]>=x1&&ip[0]<=x2&&ip[1]>=y1&&ip[1]<=y2;a=(x2-x1)*(y2-y1)}
+ else if(v.t.type==='polygon'){hit=pip(ip,v.pts);a=polyArea(v.pts)}else hit=v.pts.some(q=>dist(toS(q),p)<10);
+ if(hit&&a<=ba){best=v;ba=a}}return best}
+// rect handles: 0 TL,1 TR,2 BR,3 BL,4 top,5 right,6 bottom,7 left
+const RSPEC=[[1,1,0,0],[0,1,1,0],[0,0,1,1],[1,0,0,1],[0,1,0,0],[0,0,1,0],[0,0,0,1],[1,0,0,0]]; // [l,t,r,b]
+const RCUR=['nwse-resize','nesw-resize','nwse-resize','nesw-resize','ns-resize','ew-resize','ns-resize','ew-resize'];
+function rectHandles(pts){const[[a,b],[c,d]]=pts,mx=(a+c)/2,my=(b+d)/2;return[[a,b],[c,b],[c,d],[a,d],[mx,b],[c,my],[mx,d],[a,my]]}
+function hitHandle(v,p){
+ if(v.t.type!=='rect')return handles(v.t.type,v.pts).findIndex(h=>dist(toS(h),p)<hitR);
+ const H8=rectHandles(v.pts),P=v.pts.map(toS),big=Math.abs(P[1][0]-P[0][0])>28&&Math.abs(P[1][1]-P[0][1])>28;
+ for(let i=0;i<4;i++)if(dist(toS(H8[i]),p)<hitR)return i;
+ if(big)for(let i=4;i<8;i++)if(dist(toS(H8[i]),p)<hitR)return i;
+ const C=H8.slice(0,4).map(toS),ed=Math.min(hitR,8);
+ for(let i=0;i<4;i++)if(segDist(p,C[i],C[(i+1)%4])<ed)return 4+i; // drag anywhere on an edge
+ return -1}
+function resizeRect(drag,q,keep){
+ const[o1,o2]=drag.orig,[l,t,r,b]=RSPEC[drag.i];let x1=o1[0],y1=o1[1],x2=o2[0],y2=o2[1];
+ if(l)x1=q[0];if(r)x2=q[0];if(t)y1=q[1];if(b)y2=q[1];
+ if(keep&&drag.i<4){const ow=o2[0]-o1[0],oh=o2[1]-o1[1];if(ow>0&&oh>0){const ax=l?o2[0]:o1[0],ay=t?o2[1]:o1[1];let w=Math.abs((l?x1:x2)-ax),h=Math.abs((t?y1:y2)-ay);
+   if(w/ow>h/oh)h=w*oh/ow;else w=h*ow/oh;const sx=((l?x1:x2)>=ax)?1:-1,sy=((t?y1:y2)>=ay)?1:-1;
+   const nx=clamp(ax+sx*w,0,S.w),ny=clamp(ay+sy*h,0,S.h);if(l)x1=nx;else x2=nx;if(t)y1=ny;else y2=ny}}
+ return [[Math.min(x1,x2),Math.min(y1,y2)],[Math.max(x1,x2,Math.min(x1,x2)+1),Math.max(y1,y2,Math.min(y1,y2)+1)]]}
+function setTool(t){draft=null;tool=t;if(t!=='select')lastTool=t;document.querySelectorAll('.tool[data-tool]').forEach(b=>b.classList.toggle('on',b.dataset.tool===t));cv.style.cursor=t==='select'?'default':'crosshair';hint();render()}
+
+/* ---------- canvas pointer ---------- */
+const ptrs=new Map();let pinch=null;
+cv.addEventListener('pointerdown',e=>{
+ if(!src)return;if(playing){togglePlay();return}
+ hitR=e.pointerType==='touch'?20:e.pointerType==='pen'?14:10;cv.setPointerCapture(e.pointerId);const p=evPos(e);ptrs.set(e.pointerId,p);
+ if(ptrs.size===2){if(drag?.mode==='draw')draft=null;if(drag?.moved)changed();drag=null;const[a,b]=[...ptrs.values()];pinch={d:dist(a,b)||1,m:mid(a,b),s:view.s,ox:view.ox,oy:view.oy};render();return}
+ if(ptrs.size>2)return;const ip=toI(...p);
+ if(e.button===2){if(draft){draft=null;hint();render()}return}
+ if(e.button===1){drag={mode:'pan',last:p};return}
+ if(tool!=='select'&&!draft){const sv=visible().find(v=>v.t.id===sel);if(sv&&!sv.t.locked&&sv.t.type!=='points'){const hi=hitHandle(sv,p);if(hi>=0){drag={mode:'handle',t:sv.t,i:hi,moved:false,orig:clone(sv.pts)};return}}}
+ if(tool==='rect'){const q=clampI(ip);draft={type:'rect',pts:[q,[...q]]};drag={mode:'draw'};render();return}
+ if(tool==='polygon'){const q=clampI(ip);if(!draft)draft={type:'polygon',pts:[q],hover:q};else{if(draft.pts.length>=3&&dist(toS(draft.pts[0]),p)<10)return finishPolygon();if(dist(toS(draft.pts.at(-1)),p)<4)return;draft.pts.push(q)}hint();render();return}
+ if(tool==='point'){if(ip[0]<0||ip[1]<0||ip[0]>S.w||ip[1]>S.h)return;addTrack('points',[ip]);return}
+ const sv=visible().find(v=>v.t.id===sel);
+ if(sv&&!sv.t.locked){const hi=hitHandle(sv,p);if(hi>=0){
+  if(e.altKey&&sv.t.type==='polygon'){if(sv.pts.length<=3)return toast('Polygon cần ít nhất 3 đỉnh');pushUndo();const k=ensureKey(sv.t,S.frame);k.pts.splice(hi,1);return changed()}
+  drag={mode:'handle',t:sv.t,i:hi,moved:false,orig:clone(sv.pts)};return}}
+ const h=hitShape(ip,p);
+ if(h){sel=h.t.id;drag=h.t.locked?{mode:'pan',last:p}:{mode:'move',t:h.t,last:ip,moved:false};changed(false);return}
+ sel=null;drag={mode:'pan',last:p};changed(false);
+});
+cv.addEventListener('pointermove',e=>{
+ const p=evPos(e);mouse=p;if(ptrs.has(e.pointerId))ptrs.set(e.pointerId,p);if(!src)return;const ip=toI(...p);status(ip);
+ if(pinch&&ptrs.size===2){fitted=false;const[a,b]=[...ptrs.values()],m=mid(a,b),ns=clamp(pinch.s*dist(a,b)/pinch.d,MIN,MAX),f=ns/pinch.s;view.s=ns;view.ox=m[0]-(pinch.m[0]-pinch.ox)*f;view.oy=m[1]-(pinch.m[1]-pinch.oy)*f;render();return}
+ if(!drag){if(draft?.type==='polygon')draft.hover=clampI(ip);
+  const sv=visible().find(v=>v.t.id===sel),hi=sv&&!sv.t.locked&&sv.t.type!=='points'&&!draft?hitHandle(sv,p):-1;
+  if(hi>=0)cv.style.cursor=sv.t.type==='rect'?RCUR[hi]:'crosshair';
+  else if(tool==='select'){const h=hitShape(ip,p);cv.style.cursor=h?(h.t.locked?'pointer':'move'):'default'}else cv.style.cursor='crosshair';
+  if(tool!=='select'&&!playing)render();return}
+ if(drag.mode==='pan'){fitted=false;view.ox+=p[0]-drag.last[0];view.oy+=p[1]-drag.last[1];drag.last=p;render();return}
+ if(drag.mode==='draw'){draft.pts[1]=clampI(ip);render();return}
+ if(!drag.moved){pushUndo();ensureKey(drag.t,S.frame);drag.moved=true}
+ const k=drag.t.kf[S.frame];
+ if(drag.mode==='move'){updBoxEd();const b=bbox(k.pts),dx=clamp(ip[0]-drag.last[0],-b[0],S.w-b[2]),dy=clamp(ip[1]-drag.last[1],-b[1],S.h-b[3]);k.pts.forEach(q=>{q[0]+=dx;q[1]+=dy});drag.last=[drag.last[0]+dx,drag.last[1]+dy]}
+ else{const q=clampI(ip);if(drag.t.type==='rect')k.pts=resizeRect(drag,q,e.shiftKey);else k.pts[drag.i]=q}
+ render();updBoxEd();
+});
+function pUp(e){ptrs.delete(e.pointerId);if(ptrs.size<2)pinch=null;if(!drag)return;const d=drag;drag=null;
+ if(d.mode==='pan')return;
+ if(d.mode==='draw'&&draft){const[a,b]=draft.pts,ok=Math.abs(b[0]-a[0])*view.s>=4&&Math.abs(b[1]-a[1])*view.s>=4,pts=norm(draft.pts);draft=null;if(ok)addTrack('rect',pts);else render();return}
+ if(d.moved){const k=d.t.kf[S.frame];if(d.t.type==='rect')k.pts=norm(k.pts);roundKf(k);changed()}}
+cv.addEventListener('pointerup',pUp);cv.addEventListener('pointercancel',pUp);
+cv.addEventListener('pointerleave',()=>{mouse=null;if(tool!=='select'&&!playing)render()});
+cv.addEventListener('contextmenu',e=>e.preventDefault());
+cv.addEventListener('dblclick',e=>{
+ if(tool==='polygon'&&draft)return finishPolygon();
+ if(tool==='select'){const sv=visible().find(v=>v.t.id===sel),p=evPos(e);if(sv?.t.type==='polygon'&&!sv.t.locked){const P=sv.pts;for(let i=0;i<P.length;i++)if(segDist(p,toS(P[i]),toS(P[(i+1)%P.length]))<8){pushUndo();const k=ensureKey(sv.t,S.frame);k.pts.splice(i+1,0,clampI(toI(...p)));roundKf(k);changed();return}}}
+});
+cv.addEventListener('wheel',e=>{e.preventDefault();zoomAt(evPos(e),Math.exp(-e.deltaY*(e.ctrlKey?0.01:0.0015)))},{passive:false});
+
+/* timeline pointer */
+let tlDrag=false;
+const tlSeek=e=>{if(!src)return;const x=evPos(e,tl)[0];goFrame(Math.floor(x/tl.clientWidth*S.n))};
+tl.addEventListener('pointerdown',e=>{tlDrag=true;tl.setPointerCapture(e.pointerId);tlSeek(e)});
+tl.addEventListener('pointermove',e=>{if(tlDrag)tlSeek(e)});
+tl.addEventListener('pointerup',()=>tlDrag=false);tl.addEventListener('pointercancel',()=>tlDrag=false);
+
+/* ---------- keyboard ---------- */
+addEventListener('keydown',e=>{
+ if($('#modalBg').classList.contains('show')){if(e.key==='Escape')closeModal();return}
+ if(e.target.closest&&e.target.closest('input,select,textarea'))return;
+ const k=e.key.toLowerCase(),mod=e.ctrlKey||e.metaKey;
+ if(mod&&k==='z'){e.preventDefault();e.shiftKey?redo():undo();return}
+ if(mod&&k==='y'){e.preventDefault();redo();return}
+ if(mod)return;
+ const st=e.shiftKey?10:1;
+ switch(e.key){
+  case ' ':e.preventDefault();togglePlay();return;
+  case 'ArrowLeft':e.preventDefault();if(e.altKey&&sel)return resizeBy(-st,0);sel?nudge(-st,0):goFrame(S.frame-st);return;
+  case 'ArrowRight':e.preventDefault();if(e.altKey&&sel)return resizeBy(st,0);sel?nudge(st,0):goFrame(S.frame+st);return;
+  case 'ArrowUp':if(sel){e.preventDefault();e.altKey?resizeBy(0,-st):nudge(0,-st)}return;
+  case 'ArrowDown':if(sel){e.preventDefault();e.altKey?resizeBy(0,st):nudge(0,st)}return;
+  case 'Home':goFrame(0);return;case 'End':goFrame(S.n-1);return;
+ }
+ if(k==='b'&&!e.ctrlKey&&!e.metaKey){MD.show=!MD.show;$('#mdShow').checked=MD.show;render();return}
+ if(e.key===']'){gotoIssue(Math.min(GT.issues.length-1,GT.cur+1));return}
+ if(e.key==='['){gotoIssue(Math.max(0,GT.cur-1));return}
+ if(e.key===','){evGoto(EV.cur-1);return}
+ if(e.key==='.'){evGoto(EV.cur+1);return}
+ switch(k){
+  case 's':setTool('select');break;case 'r':setTool('rect');break;case 'p':setTool('polygon');break;case 't':setTool('point');break;case 'n':setTool(lastTool);break;
+  case 'f':goFrame(S.frame+st);break;case 'd':goFrame(S.frame-st);break;
+  case 'k':toggleKey();break;case 'o':toggleOutside();break;case 'q':jumpKey(-1);break;case 'e':jumpKey(1);break;
+  case '0':fit();break;case '+':case '=':zoomAt([W/2,H/2],1.25);break;case '-':zoomAt([W/2,H/2],0.8);break;
+  case 'escape':draft=null;sel=null;changed(false);break;
+  case 'enter':if(draft)finishPolygon();break;
+  case 'delete':case 'backspace':e.preventDefault();if(draft?.type==='polygon'){draft.pts.pop();if(!draft.pts.length)draft=null;hint();render()}else delSel();break;
+  case 'h':{const t=selTrack();if(t){t.hidden=!t.hidden;changed()}break}
+  case 'l':{const t=selTrack();if(t){t.locked=!t.locked;changed()}break}
+  default:if(/^[1-9]$/.test(k)){const l=S.labels[+k-1];if(l)setCurLabel(l.id,true)}
+ }
+});
+
+/* ---------- export ---------- */
+const pad=n=>String(n).padStart(6,'0');
+function exportNative(){return JSON.stringify({format:'mini-cvat-video',version:1,video:{name:S.name,width:S.w,height:S.h,fps:S.fps,frames:S.n},
+ labels:S.labels.map(l=>({name:l.name,color:l.color})),
+ tracks:S.tracks.map(t=>({id:t.id,label:lname(t.label),type:t.type,keyframes:keys(t).map(k=>({frame:k,outside:t.kf[k].outside,points:t.kf[k].pts.flat()}))}))},null,1)}
+function exportCVAT(){
+ const x=s=>esc(s);const L=[];L.push('<?xml version="1.0" encoding="utf-8"?>','<annotations>','  <version>1.1</version>','  <meta>','    <task>',
+  `      <name>${x(S.name)}</name>`,`      <size>${S.n}</size>`,'      <mode>interpolation</mode>',`      <start_frame>0</start_frame>`,`      <stop_frame>${S.n-1}</stop_frame>`,'      <labels>');
+ for(const l of S.labels)L.push(`        <label><name>${x(l.name)}</name><color>${l.color}</color><type>any</type><attributes></attributes></label>`);
+ L.push('      </labels>',`      <original_size><width>${S.w}</width><height>${S.h}</height></original_size>`,'    </task>',`    <source>${x(S.name)}</source>`,'  </meta>');
+ S.tracks.forEach((t,i)=>{L.push(`  <track id="${i}" label="${x(lname(t.label))}" source="manual">`);
+  for(const k of keys(t)){const s=t.kf[k],o=s.outside?1:0,base=`frame="${k}" keyframe="1" outside="${o}" occluded="0"`;
+   if(t.type==='rect'){const[[a,b],[c,d]]=s.pts;L.push(`    <box ${base} xtl="${a.toFixed(2)}" ytl="${b.toFixed(2)}" xbr="${c.toFixed(2)}" ybr="${d.toFixed(2)}" z_order="0"></box>`)}
+   else L.push(`    <${t.type==='polygon'?'polygon':'points'} ${base} points="${s.pts.map(p=>p[0].toFixed(2)+','+p[1].toFixed(2)).join(';')}" z_order="0"></${t.type==='polygon'?'polygon':'points'}>`)}
+  L.push('  </track>')});
+ L.push('</annotations>');return L.join('\n')}
+function perFrame(fn){for(let f=0;f<S.n;f++)for(const t of S.tracks){const s=stateAt(t,f);if(s)fn(f,t,s.pts)}}
+function exportTrajXML(){const L=['<?xml version = "1.0"?>',`<Video fname="${esc(S.name)}" start_frame="1" end_frame="${S.n}">`];
+ for(const t of S.tracks){if(t.type==='points')continue;const rows=[];for(let f=0;f<S.n;f++){const s=stateAt(t,f);if(!s)continue;const b=bbox(s.pts);rows.push(`\t\t<Frame frame_no="${f+1}" x="${Math.round(b[0])}" y="${Math.round(b[1])}" width="${Math.round(b[2]-b[0])}" height="${Math.round(b[3]-b[1])}" observation="1"></Frame>`)}
+  if(!rows.length)continue;const fs=rows.map(r=>+r.match(/frame_no="(\d+)"/)[1]);L.push(`  <Trajectory obj_id="${t.id}" start_frame="${fs[0]}" end_frame="${fs.at(-1)}">`,...rows,'\t</Trajectory>')}
+ L.push('</Video>');return L.join('\n')}
+function exportMOT(){const idx={};S.labels.forEach((l,i)=>idx[l.id]=i+1);const lines=[];
+ perFrame((f,t,P)=>{if(t.type==='points')return;const b=bbox(P);lines.push([f+1,t.id,r2(b[0]),r2(b[1]),r2(b[2]-b[0]),r2(b[3]-b[1]),1,idx[t.label],1].join(','))});
+ lines.sort((a,b)=>{const A=a.split(',').map(Number),B=b.split(',').map(Number);return A[0]-B[0]||A[1]-B[1]});
+ return {'gt/gt.txt':lines.join('\n'),'gt/labels.txt':S.labels.map(l=>l.name).join('\n')}}
+function exportYOLO(seg){const idx={};S.labels.forEach((l,i)=>idx[l.id]=i);const fr={};
+ perFrame((f,t,P)=>{if(t.type==='points')return;let line;
+  if(seg){const Q=t.type==='rect'?handles('rect',P):P;line=idx[t.label]+' '+Q.map(p=>(p[0]/S.w).toFixed(6)+' '+(p[1]/S.h).toFixed(6)).join(' ')}
+  else{const b=bbox(P);line=[idx[t.label],((b[0]+b[2])/2/S.w).toFixed(6),((b[1]+b[3])/2/S.h).toFixed(6),((b[2]-b[0])/S.w).toFixed(6),((b[3]-b[1])/S.h).toFixed(6)].join(' ')}
+  (fr[f]=fr[f]||[]).push(line)});
+ const files={'classes.txt':S.labels.map(l=>l.name).join('\n')};for(const f of Object.keys(fr))files['labels/frame_'+pad(+f)+'.txt']=fr[f].join('\n');return files}
+const filesText=files=>Object.entries(files).map(([k,v])=>`# ===== ${k} =====\n${v}`).join('\n\n');
+async function zipBlob(files){const z=new JSZip();for(const[k,v]of Object.entries(files))z.file(k,v);return z.generateAsync({type:'blob'})}
+
+let dlNs=null;const dlReady=(window.claude&&window.claude.use)?window.claude.use('downloads').then(n=>dlNs=n).catch(()=>null):Promise.resolve(null);
+async function saveFile(data,name){
+ if(window.claude&&window.claude.use){await Promise.race([dlReady,new Promise(r=>setTimeout(r,1500))]);
+  if(dlNs){try{await dlNs.save({filename:name,data});toast('Đã lưu '+name)}catch(e){toast(e&&e.code==='declined'?'Đã hủy tải xuống':'Không tải được ở đây — hãy dùng nút Sao chép')}return}}
+ try{const blob=data instanceof Blob?data:new Blob([data]);const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),5000);toast('Đang tải '+name)}catch(e){toast('Không tải được — hãy dùng nút Sao chép')}}
+
+function openModal(title,html){$('#modal').classList.remove('wide');$('#mTitle').textContent=title;$('#mBody').innerHTML=html;$('#modalBg').classList.add('show')}
+function closeModal(){$('#modalBg').classList.remove('show')}
+$('#mClose').onclick=closeModal;$('#modalBg').onclick=e=>{if(e.target.id==='modalBg')closeModal()};
+
+function showExport(){
+ if(!src)return toast('Chưa mở video');if(playing)togglePlay();
+ openModal('Xuất annotation',`<div class="row"><span>Định dạng</span><select class="btn" id="fmt">
+  <option value="cvat">CVAT for video 1.1 (XML – nhập thẳng vào CVAT)</option><option value="native">Mini CVAT JSON (đầy đủ, nhập lại được)</option>
+  <option value="mot">MOT 1.1 (gt.txt – tracking)</option><option value="traj">Music Video XML (Video / Trajectory)</option><option value="yolo">YOLO detection (txt mỗi frame)</option><option value="yoloseg">YOLO segmentation (txt mỗi frame)</option></select></div>
+  <textarea id="out" readonly spellcheck="false"></textarea><div class="note" id="outNote"></div>
+  <div class="row"><button class="btn primary" id="copyOut">Sao chép</button><button class="btn" id="dlOut">Tải xuống</button></div>`);
+ let cur;
+ const upd=()=>{const f=$('#fmt').value;let note='',text,dl;
+  if(f==='cvat'){text=exportCVAT();dl=async()=>window.JSZip?saveFile(await zipBlob({'annotations.xml':text}),'cvat_video_annotations.zip'):saveFile(text,'annotations.xml');note='Chỉ ghi keyframe; CVAT tự nội suy khi nhập. Tải xuống tạo file .zip chứa annotations.xml (CVAT nhận trực tiếp).'}
+  else if(f==='native'){text=exportNative();dl=()=>saveFile(text,(S.name||'video')+'_minicvat.json');note=''}
+  else if(f==='traj'){text=exportTrajXML();dl=()=>saveFile(text,(S.name||'video').replace(/\.[^.]+$/,'')+'_gt.xml');note='Định dạng GT của Music Video dataset: frame_no đếm từ 1, mỗi Trajectory là một ID, frame vắng mặt không được ghi.'}
+  else if(f==='mot'){const fl=exportMOT();text=filesText(fl);dl=async()=>window.JSZip?saveFile(await zipBlob(fl),'mot_annotations.zip'):saveFile(fl['gt/gt.txt'],'gt.txt');note='Mỗi dòng: frame(1-based), track_id, x, y, w, h, 1, class_id, 1. Polygon được quy về bbox; điểm bị bỏ qua.'}
+  else{const fl=exportYOLO(f==='yoloseg');text=filesText(fl);dl=async()=>window.JSZip?saveFile(await zipBlob(fl),f==='yolo'?'yolo_detection.zip':'yolo_seg.zip'):saveFile(text,'yolo.txt');
+   note=`${Object.keys(fl).length-1} frame có nhãn. Tên file theo số frame (frame_000123.txt) — khi tách frame bằng ffmpeg hãy đặt tên tương ứng, ví dụ: ffmpeg -i video.mp4 -vsync 0 -start_number 0 frame_%06d.jpg`}
+  cur={text,dl};const big=text.length>400000;$('#out').value=big?text.slice(0,400000)+'\n… (đã cắt bớt phần xem trước — dùng Tải xuống để có đủ)':text;$('#outNote').textContent=note};
+ $('#fmt').onchange=upd;upd();
+ $('#copyOut').onclick=async()=>{try{await navigator.clipboard.writeText(cur.text);toast('Đã sao chép')}catch(e){const t=$('#out');t.focus();t.select();try{document.execCommand('copy');toast('Đã sao chép')}catch(_){toast('Hãy chọn và sao chép thủ công')}}};
+ $('#dlOut').onclick=()=>cur.dl();
+}
+/* ---------- import ---------- */
+function showImport(){
+ if(!src)return toast('Hãy mở video trước khi nhập annotation');
+ openModal('Nhập annotation',`<div class="note">Hỗ trợ: CVAT for video 1.1 (.xml hoặc .zip), CVAT for images 1.1 (frame = id ảnh), Mini CVAT JSON, XML Music Video dataset (&lt;Video&gt;&lt;Trajectory&gt;&lt;Frame&gt;, giữ nguyên obj_id), JSONL mỗi dòng một frame (<code>{"sample_id":"video/frame-000011","object":[{"track_id":"1","bbox":[…]}]}</code>).</div>
+  <div class="row"><button class="btn" id="pickAnn">Chọn file…</button><label class="chk"><input type="checkbox" id="replaceChk" checked>Xóa annotation hiện tại trước khi nhập</label></div>
+  <textarea id="inTxt" placeholder="…hoặc dán nội dung XML / JSON vào đây" spellcheck="false"></textarea><div class="row"><button class="btn primary" id="doImport">Nhập</button></div>`);
+ $('#pickAnn').onclick=()=>$('#annIn').click();$('#doImport').onclick=()=>{if(importData($('#inTxt').value,$('#replaceChk').checked))closeModal()};
+}
+$('#annIn').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;let txt;
+ if(/\.zip$/i.test(f.name)){if(!window.JSZip)return toast('Không đọc được zip ở đây');const z=await JSZip.loadAsync(f);const ent=Object.values(z.files).find(x=>/\.xml$/i.test(x.name))||Object.values(z.files).find(x=>/\.json$/i.test(x.name));if(!ent)return toast('Zip không có file .xml/.json');txt=await ent.async('string')}
+ else txt=await f.text();
+ if(importData(txt,$('#replaceChk')?$('#replaceChk').checked:true))closeModal()};
+function importData(txt,replace){
+ txt=(txt||'').trim();if(!txt){toast('Chưa có nội dung');return false}
+ const labelId=(n,color)=>{let l=S.labels.find(x=>x.name===n);if(!l){l={id:S.nextLabel++,name:n,color:color||PALETTE[S.labels.length%PALETTE.length]};S.labels.push(l)}else if(color&&/^#[0-9a-f]{6}$/i.test(color))l.color=color;return l.id};
+ const out=[];
+ if(txt[0]==='<'){const doc=new DOMParser().parseFromString(txt,'application/xml');if(doc.querySelector('parsererror')){toast('XML không hợp lệ');return false}
+  const vroot=doc.documentElement.tagName==='Video'?doc.documentElement:doc.querySelector('Video');
+  if(vroot&&vroot.querySelector('Trajectory')){ // XML Music Video dataset: <Video><Trajectory obj_id><Frame frame_no x y width height/>
+   const off=+(vroot.getAttribute('start_frame')||1),lid=labelId('face'),used=new Set(replace?[]:S.tracks.map(t=>t.id));let skipped=0;
+   vroot.querySelectorAll('Trajectory').forEach(tr=>{const fr=[...tr.querySelectorAll('Frame')].map(e=>({f:+e.getAttribute('frame_no')-off,x:+e.getAttribute('x'),y:+e.getAttribute('y'),w:+e.getAttribute('width'),h:+e.getAttribute('height')})).filter(o=>{if(o.f<0||o.f>=S.n){skipped++;return false}return true}).sort((a,b)=>a.f-b.f);
+    if(!fr.length)return;let id=Math.round(+tr.getAttribute('obj_id'));if(!(id>0)||used.has(id))id=S.nextId;used.add(id);S.nextId=Math.max(S.nextId,id+1);
+    const t={id,type:'rect',label:lid,kf:{},hidden:false,locked:false};
+    fr.forEach((o,i)=>{t.kf[o.f]={pts:[[o.x,o.y],[o.x+o.w,o.y+o.h]],outside:false};const nx=fr[i+1];if((nx&&nx.f>o.f+1)||(!nx&&o.f+1<S.n))t.kf[o.f+1]={pts:[[o.x,o.y],[o.x+o.w,o.y+o.h]],outside:true}});out.push(t)});
+   if(skipped)toast(`${skipped} box nằm ngoài số frame của video (kiểm tra FPS)`,4000);
+  }
+  doc.querySelectorAll('meta label').forEach(l=>{const n=l.querySelector('name')?.textContent;if(n)labelId(n,l.querySelector('color')?.textContent)});
+  const TAG={box:'rect',polygon:'polygon',points:'points'};
+  const ptsOf=el=>el.tagName==='box'?[[+el.getAttribute('xtl'),+el.getAttribute('ytl')],[+el.getAttribute('xbr'),+el.getAttribute('ybr')]]:el.getAttribute('points').split(';').map(s=>s.split(',').map(Number));
+  doc.querySelectorAll('annotations > track').forEach(tr=>{const kids=[...tr.children].filter(c=>TAG[c.tagName]);if(!kids.length)return;
+   let ks=kids.filter(c=>c.getAttribute('keyframe')==='1');if(!ks.length)ks=kids;
+   const t={id:S.nextId++,type:TAG[kids[0].tagName],label:labelId(tr.getAttribute('label')),kf:{},hidden:false,locked:false};
+   for(const c of ks){t.kf[+c.getAttribute('frame')]={pts:ptsOf(c),outside:c.getAttribute('outside')==='1'}}out.push(t)});
+  doc.querySelectorAll('annotations > image').forEach(im=>{const f=+im.getAttribute('id');[...im.children].filter(c=>TAG[c.tagName]).forEach(c=>{
+   const P=ptsOf(c),t={id:S.nextId++,type:TAG[c.tagName],label:labelId(c.getAttribute('label')),kf:{[f]:{pts:P,outside:false}},hidden:false,locked:false};if(f+1<S.n)t.kf[f+1]={pts:clone(P),outside:true};out.push(t)})});
+ }else if(looksJsonl(txt)){jsonlDialog(txt,'gt',replace);return false}
+ else{let d;try{d=JSON.parse(txt)}catch(e){toast('Nội dung không phải JSON/XML hợp lệ');return false}
+  if(d.format!=='mini-cvat-video'){toast('JSON không đúng định dạng Mini CVAT video');return false}
+  (d.labels||[]).forEach(l=>labelId(l.name,l.color));
+  for(const tr of d.tracks||[]){const t={id:S.nextId++,type:tr.type,label:labelId(tr.label),kf:{},hidden:false,locked:false};
+   for(const k of tr.keyframes||[]){const P=[];for(let i=0;i+1<k.points.length;i+=2)P.push([k.points[i],k.points[i+1]]);t.kf[k.frame]={pts:P,outside:!!k.outside}}
+   if(Object.keys(t.kf).length)out.push(t)}}
+ if(!out.length){toast('Không tìm thấy đối tượng nào');renderLabels();return false}
+ pushUndo();S.tracks=replace?out:S.tracks.concat(out);sel=null;renderLabels();changed();toast(`Đã nhập ${out.length} track`);return true}
+
+function showHelp(){
+ const rows=[['Space','Phát / dừng'],['F / D','Frame sau / trước (Shift: ±10)'],['← / →','Frame trước/sau (khi không chọn đối tượng)'],['Home / End','Frame đầu / cuối'],
+  ['S','Chọn / chỉnh sửa'],['R / P / T','Vẽ box / polygon / điểm'],['N','Lặp lại công cụ vẽ gần nhất'],
+  ['K','Bật/tắt keyframe của đối tượng đang chọn'],['O','Outside: đối tượng biến mất từ frame này (bấm lại để hiện lại)'],['Q / E','Nhảy tới keyframe trước / sau'],
+  ['1 – 9','Chọn nhãn (đổi luôn nhãn đối tượng đang chọn)'],['Enter / double-click','Đóng polygon'],['Esc','Hủy vẽ / bỏ chọn'],['Del','Xóa cả track'],
+  ['Mũi tên (khi đã chọn)','Dịch đối tượng 1px (Shift: 10px), tạo keyframe'],['Kéo góc / cạnh box','Resize (Shift: giữ tỉ lệ). Có thể resize ngay cả khi đang ở công cụ vẽ'],['Alt + mũi tên','Đổi chiều rộng / cao box 1px (Shift: 10px)'],['H / L','Ẩn / khóa'],['[ / ]','Nghi vấn GT trước / sau (sau khi chạy Đánh giá GT)'],['B','Ẩn / hiện box model'],[', / .','Đoạn model sai trước / sau (sau khi chạy Đánh giá model)'],['Ctrl+Z / Ctrl+Y','Hoàn tác / làm lại'],
+  ['Lăn chuột, chụm 2 ngón','Zoom'],['Kéo vùng trống, chuột giữa','Di chuyển khung nhìn'],['0','Vừa khung'],['Double-click cạnh polygon','Thêm đỉnh'],['Alt + click đỉnh','Xóa đỉnh']];
+ openModal('Cách dùng & phím tắt',`<div class="note"><b>Quy trình track:</b> ở frame đầu, vẽ đối tượng → tua tới frame sau, kéo/chỉnh đối tượng cho khớp (tự tạo keyframe ◆) → các frame ở giữa được nội suy tuyến tính. Khi đối tượng ra khỏi khung hình, bấm <b>Outside</b> (O). Timeline phía dưới: mỗi hàng là một track, ◆ là keyframe của track đang chọn.</div>
+ <table class="keys">${rows.map(r=>`<tr><td><kbd>${r[0]}</kbd></td><td>${r[1]}</td></tr>`).join('')}</table>
+ <div class="note">Annotation được tự lưu trong trình duyệt theo tên file video; mở lại đúng video là tiếp tục được. Nên xuất file định kỳ để sao lưu.</div>`)}
+
+/* =====================================================================
+   ĐÁNH GIÁ GROUND TRUTH (bản trình duyệt của analyze_gt.py)
+   Nhóm A + kiểm tra nhãn + thống kê: tính trực tiếp từ các track
+   Nhóm B: quét pixel video (độ nét, độ sáng, vùng phẳng, frame lặp, cắt cảnh)
+   Nhóm C: YuNet / SFace qua opencv.js (mặt thiếu nhãn, box không thấy mặt,
+           lệch quy ước box, cùng người 2 ID, 1 ID 2 người)
+   ===================================================================== */
+const GT={issues:[],cur:-1,res:null,running:false,cancel:false,sfaceBytes:null,yunetBytes:null};
+const YUNET_MIN=10,YUNET_MAX=300,SIZE_EDGES=[0,10,24,64,300,1e9],SIZE_NAMES=['<10','10-24','24-64','64-300','>300'];
+
+/* ---------- dữ liệu: box theo từng frame, tính nhanh từ keyframe ---------- */
+function trackBoxes(t){
+ const ks=keys(t),out=[];
+ for(let i=0;i<ks.length;i++){const k=ks[i],a=t.kf[k];if(a.outside)continue;const nk=i+1<ks.length?ks[i+1]:S.n,b=i+1<ks.length?t.kf[nk]:null;
+  for(let f=k;f<Math.min(nk,S.n);f++){let P=a.pts;
+   if(b&&!b.outside&&b.pts.length===a.pts.length&&f>k){const r=(f-k)/(nk-k);P=a.pts.map((q,j)=>[q[0]+(b.pts[j][0]-q[0])*r,q[1]+(b.pts[j][1]-q[1])*r])}
+   const bb=bbox(P);out.push({f,id:t.id,x:bb[0],y:bb[1],w:bb[2]-bb[0],h:bb[3]-bb[1],key:f===k})}}
+ return out}
+function gtData(labelId){
+ const rows=[];for(const t of S.tracks){if(t.type==='points')continue;if(labelId&&t.label!==labelId)continue;rows.push(...trackBoxes(t))}
+ const T=new Map(),F=new Map();rows.forEach((r,i)=>{if(!T.has(r.id))T.set(r.id,[]);T.get(r.id).push(i);if(!F.has(r.f))F.set(r.f,[]);F.get(r.f).push(i)});
+ for(const L of T.values())L.sort((a,b)=>rows[a].f-rows[b].f);
+ return {rows,T,F}}
+const iou=(a,b)=>{const iw=Math.max(0,Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x)),ih=Math.max(0,Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y)),i=iw*ih,u=a.w*a.h+b.w*b.h-i;return u>0?i/u:0};
+const cen=b=>[b.x+b.w/2,b.y+b.h/2];
+const pctl=(a,q)=>{if(!a.length)return NaN;const s=[...a].sort((x,y)=>x-y),i=(s.length-1)*q/100,lo=Math.floor(i),hi=Math.ceil(i);return s[lo]+(s[hi]-s[lo])*(i-lo)};
+const med=a=>pctl(a,50);
+const P1=x=>isFinite(x)?(x*100).toFixed(1)+'%':'?';
+
+/* ---------- 1–6: thống kê ---------- */
+function stats(D){
+ const {rows,T,F}=D,fps=S.fps,o={};
+ const per=[...F.values()].map(v=>v.length);
+ o.overview={video:S.name,res:S.w+'×'+S.h,fps,frames:S.n,labeled:F.size,empty:S.n-F.size,boxes:rows.length,ids:T.size,mean:per.length?(per.reduce((a,b)=>a+b,0)/per.length).toFixed(2):0,max:per.length?Math.max(...per):0};
+ const side=rows.map(r=>Math.max(r.w,r.h));o.side=side;
+ o.byInput={};for(const [n,L] of [['native',0],['640',640],['960',960],['1280',1280]]){const k=L?L/Math.max(S.w,S.h):1,s=side.map(v=>v*k),h={};
+  SIZE_NAMES.forEach((nm,i)=>h[nm]=s.filter(v=>v>=SIZE_EDGES[i]&&v<SIZE_EDGES[i+1]).length/Math.max(1,s.length));h.inRange=s.filter(v=>v>=YUNET_MIN&&v<=YUNET_MAX).length/Math.max(1,s.length);o.byInput[n]=h}
+ o.suggestSize=Object.keys(o.byInput).reduce((a,b)=>o.byInput[b].inRange>o.byInput[a].inRange?b:a,'native');
+ const ar=rows.map(r=>r.w/Math.max(r.h,1e-6));o.ar=ar;const lo=pctl(ar,0.5),hi=pctl(ar,99.5);o.arP=[0.5,5,50,95,99.5].map(q=>pctl(ar,q));o.suggestAr=[+(Math.min(lo*0.9,0.6)).toFixed(2),+(Math.max(hi*1.1,1.3)).toFixed(2)];
+ o.edge=rows.filter(r=>r.x<=2||r.y<=2||r.x+r.w>=S.w-2||r.y+r.h>=S.h-2).length/Math.max(1,rows.length);o.cx=rows.map(r=>(r.x+r.w/2)/S.w);o.cy=rows.map(r=>(r.y+r.h/2)/S.h);
+ const lens=[],gaps=[],segs=[];let reapp=0;o.perId=[];
+ for(const [id,L] of T){const f=L.map(i=>rows[i].f);lens.push(f.length);let g=[];for(let i=1;i<f.length;i++){const d=f[i]-f[i-1]-1;if(d>0)g.push(d)}gaps.push(...g);segs.push(g.length+1);reapp+=g.filter(x=>x>fps).length;
+  o.perId.push({id,first:f[0],last:f.at(-1),boxes:f.length,segments:g.length+1,longest:g.length?Math.max(...g):0})}
+ o.lens=lens;o.gaps=gaps;o.segs=segs;o.reapp=reapp;
+ const short=gaps.filter(g=>g<=fps),mid=gaps.filter(g=>g<=2*fps);
+ o.maxGap=short.length?Math.round(clamp(Math.ceil(pctl(short,95)),2,fps)):8;o.maxLost=mid.length?Math.round(clamp(Math.ceil(pctl(mid,99)),fps/2,2*fps)):Math.round(fps);
+ const ious=[],disp=[];let camP=0,camM=0;const step=new Map();
+ for(const [id,L] of T)for(let i=1;i<L.length;i++){const a=rows[L[i-1]],b=rows[L[i]];if(b.f-a.f!==1)continue;ious.push(iou(a,b));const c1=cen(a),c2=cen(b),h=Math.max(a.h,1);
+  disp.push(Math.hypot(c2[0]-c1[0],c2[1]-c1[1])/h);if(!step.has(b.f))step.set(b.f,[]);step.get(b.f).push([(c2[0]-c1[0])/h,(c2[1]-c1[1])/h])}
+ for(const m of step.values()){if(m.length<2)continue;camP++;const mag=m.map(v=>Math.hypot(v[0],v[1]));if(mag.every(x=>x>0.08)){const u=m.map((v,i)=>[v[0]/mag[i],v[1]/mag[i]]);let ok=true;for(let i=0;i<u.length;i++)for(let j=i+1;j<u.length;j++)if(u[i][0]*u[j][0]+u[i][1]*u[j][1]<=0.9)ok=false;if(ok)camM++}}
+ o.ious=ious;o.disp=disp;o.iouLt03=ious.filter(x=>x<0.3).length/Math.max(1,ious.length);o.cam=camP?camM/camP:NaN;o.iou1=ious.length?+clamp(pctl(ious,2),0.1,0.3).toFixed(2):0.3;
+ // tương tác
+ const ev=[],state=new Map();
+ for(const f of [...F.keys()].sort((a,b)=>a-b)){const idx=F.get(f),seen=new Set();
+  for(let i=0;i<idx.length;i++)for(let j=i+1;j<idx.length;j++){let a=rows[idx[i]],b=rows[idx[j]];if(a.id>b.id)[a,b]=[b,a];const o2=iou(a,b),ca=cen(a),cb=cen(b),d=Math.hypot(ca[0]-cb[0],ca[1]-cb[1]);
+   if(o2>0||d<Math.max(a.h,b.h)){const key=a.id+'-'+b.id;seen.add(key);const ord=Math.sign(ca[0]-cb[0]);let e=state.get(key);
+    if(!e||f-e.end>1){if(e)ev.push(e);e={id1:a.id,id2:b.id,start:f,end:f,maxIou:0,ord,crossed:false};state.set(key,e)}
+    e.end=f;e.maxIou=Math.max(e.maxIou,o2);if(ord&&e.ord&&ord!==e.ord)e.crossed=true}}
+  for(const [k,e] of state)if(!seen.has(k)&&e.end<f-1){ev.push(e);state.delete(k)}}
+ ev.push(...state.values());ev.sort((a,b)=>(b.crossed-a.crossed)||(b.maxIou-a.maxIou));o.events=ev;
+ return o}
+
+/* ---------- 7 + nhóm A: nghi vấn nhãn ---------- */
+function labelChecks(D){
+ const {rows,T,F}=D,fps=S.fps,out=[];const add=(f,id,kind,detail,grp='Q')=>out.push({f,id,kind,detail,grp});
+ for(const r of rows){
+  if(Math.max(r.w,r.h)<4)add(r.f,r.id,'box quá nhỏ (<4px)',`${r.w.toFixed(1)}×${r.h.toFixed(1)}`);
+  if(r.h>0&&(r.w/r.h<0.3||r.w/r.h>2.5))add(r.f,r.id,'tỉ lệ w/h bất thường',`w/h = ${(r.w/r.h).toFixed(2)} (mặt thường 0,7–1,0)`);
+  if(r.h>0.6*S.h||r.w>0.6*S.w)add(r.f,r.id,'box quá lớn',`${r.w.toFixed(0)}×${r.h.toFixed(0)} (> 60% khung hình)`)}
+ for(const [f,idx] of F)for(let i=0;i<idx.length;i++)for(let j=i+1;j<idx.length;j++){const a=rows[idx[i]],b=rows[idx[j]],o=iou(a,b);if(o>0.7)add(f,a.id,'1 mặt bị gán 2 ID',`trùng với #${b.id} (IoU ${o.toFixed(2)})`)}
+ for(const [id,L] of T){
+  if(L.length<=2)add(rows[L[0]].f,id,'track quá ngắn',`chỉ có ${L.length} box: gán nhầm? nên gộp vào ID khác?`);
+  for(let i=1;i<L.length;i++){const a=rows[L[i-1]],b=rows[L[i]];
+   if(b.f-a.f===2)add(a.f+1,id,'thiếu 1 frame giữa track','bị Outside đúng 1 frame: có thể bấm nhầm');
+   if(b.f-a.f!==1)continue;const h=Math.max(a.h,1),c1=cen(a),c2=cen(b),d=Math.hypot(c2[0]-c1[0],c2[1]-c1[1]),r=b.h/h;
+   if(d>h)add(b.f,id,'nhảy vị trí',`dịch ${(d/h).toFixed(1)} lần chiều cao mặt trong 1 frame (nhầm ID?)`);
+   if(r>1.6||r<1/1.6)add(b.f,id,'nhảy kích thước',`×${r.toFixed(2)} trong 1 frame`)}
+  // khoảng keyframe dài: box nội suy có thể lệch khỏi mặt
+  const kfs=L.filter(i=>rows[i].key).map(i=>rows[i]);
+  for(let i=1;i<kfs.length;i++){const a=kfs[i-1],b=kfs[i],g=b.f-a.f;if(g<=2*fps)continue;const mv=Math.hypot(...[0,1].map(k=>cen(b)[k]-cen(a)[k]))/Math.max(a.h,1);
+   const sz=Math.abs(b.h/Math.max(a.h,1)-1);if(mv<0.3&&sz<0.2)continue; // đứng yên: nội suy không sai
+   add(a.f,id,'khoảng keyframe dài',`${g} frame (${(g/fps).toFixed(1)} s) chỉ có nội suy${mv>0.5?`, dịch ${mv.toFixed(1)} lần chiều cao mặt`:''}: kiểm tra box ở giữa có còn ôm mặt`)}}
+ out.push(...groupA(D));return out}
+function groupA(D){
+ const {rows,T,F}=D,fps=S.fps,out=[];const add=(f,id,kind,detail)=>out.push({f,id,kind,detail,grp:'A'});
+ const frames=[...F.keys()],first=Math.min(...frames),last=Math.max(...frames);
+ for(const [id,L] of T){const f=L.map(i=>rows[i].f);
+  // A1 quên nhãn cả đoạn
+  for(let k=0;k+1<L.length;k++){const gap=f[k+1]-f[k]-1;if(gap<=3||gap>2*fps)continue;const A=rows[L[k]],B=rows[L[k+1]],h=Math.max(A.h,B.h,1);
+   const move=Math.hypot(cen(A)[0]-cen(B)[0],cen(A)[1]-cen(B)[1])/h,edge=Math.min(A.x,A.y,S.w-A.x-A.w,S.h-A.y-A.h)<0.5*h;let occl=false;
+   for(let g=f[k]+1;g<f[k+1]&&!occl;g++){const r=(g-f[k])/(gap+1),P={x:A.x+(B.x-A.x)*r,y:A.y+(B.y-A.y)*r,w:A.w+(B.w-A.w)*r,h:A.h+(B.h-A.h)*r};for(const j of F.get(g)||[])if(iou(P,rows[j])>0.1)occl=true}
+   if(move<1&&!edge&&!occl)add(f[k]+1,id,'nghi quên nhãn cả đoạn',`vắng ${gap} frame (${f[k]+1}–${f[k+1]-1}) nhưng trước/sau gần như cùng chỗ, không ở mép, không ai che`)}
+  // A2 xuất hiện / biến mất giữa khung
+  if(L.length>=3)for(const [i,lab] of [[L[0],'xuất hiện'],[L.at(-1),'biến mất']]){const B=rows[i];if(B.f===first||B.f===last)continue;const m=Math.min(B.x,B.y,S.w-B.x-B.w,S.h-B.y-B.h);if(m<Math.max(B.h,0.05*S.h))continue;
+   let near=false;for(let g=B.f-3;g<=B.f+3&&!near;g++)for(const j of F.get(g)||[])if(rows[j].id!==id&&iou(B,rows[j])>0)near=true;
+   if(!near)add(B.f,id,lab+' giữa khung hình',`cách mép ${m.toFixed(0)}px, không ai che: thiếu nhãn ${lab==='xuất hiện'?'trước':'sau'} frame này?`)}
+  // A3 box bỏ quên
+  let run=0;for(let k=1;k<L.length;k++){const A=rows[L[k-1]],B=rows[L[k]];if(B.f-A.f!==1){run=0;continue}
+   const d=Math.max(Math.abs(A.x-B.x),Math.abs(A.y-B.y),Math.abs(A.w-B.w),Math.abs(A.h-B.h));
+   if(d<0.5)run++;else{if(run>=Math.max(5,fps/2)&&Math.hypot(cen(A)[0]-cen(B)[0],cen(A)[1]-cen(B)[1])>0.3*Math.max(A.h,1))add(B.f,id,'box bỏ quên',`đứng yên tuyệt đối ${run} frame rồi nhảy: box có còn trên mặt trong đoạn đứng yên?`);run=0}}
+  // A5 ID dùng lại
+  for(let k=0;k+1<L.length;k++){if(f[k+1]-f[k]<=5*fps)continue;const A=rows[L[k]],B=rows[L[k+1]],r=B.h/Math.max(A.h,1),d=Math.hypot(cen(A)[0]-cen(B)[0],cen(A)[1]-cen(B)[1])/Math.max(A.h,B.h,1);
+   if(r>1.6||r<1/1.6||d>3)add(B.f,id,'ID dùng lại?',`vắng ${f[k+1]-f[k]-1} frame, quay lại với cỡ ×${r.toFixed(2)}, lệch ${d.toFixed(1)} lần chiều cao mặt: cùng một người?`)}
+  // A6 box rộng hẹp không ổn định
+  if(L.length>=10){const ch=[];for(let k=1;k<L.length;k++){const A=rows[L[k-1]],B=rows[L[k]];if(B.f-A.f===1)ch.push(Math.abs(B.h-A.h)/Math.max(A.h,1))}
+   if(ch.length>=5&&med(ch)>0.05)add(f[0],id,'box rộng hẹp không ổn định',`chiều cao box thay đổi trung vị ${(med(ch)*100).toFixed(0)}% mỗi frame`)}}
+ // A4 hai ID đổi chỗ
+ for(const f of frames){const g=F.get(f+1);if(!g)continue;const cur=new Map(F.get(f).map(i=>[rows[i].id,rows[i]])),nxt=new Map(g.map(i=>[rows[i].id,rows[i]]));
+  const both=[...cur.keys()].filter(k=>nxt.has(k)).sort((a,b)=>a-b);
+  for(let x=0;x<both.length;x++)for(let y=x+1;y<both.length;y++){const a=both[x],b=both[y],Ca=cen(cur.get(a)),Cb=cen(cur.get(b)),Na=cen(nxt.get(a)),Nb=cen(nxt.get(b)),h=Math.max(cur.get(a).h,cur.get(b).h,1);
+   const dd=(p,q)=>Math.hypot(p[0]-q[0],p[1]-q[1]),keep=dd(Ca,Na)+dd(Cb,Nb),sw=dd(Ca,Nb)+dd(Cb,Na);
+   if(sw<0.5*keep&&keep>0.6*h)add(f+1,a,'hai ID đổi chỗ',`#${a} và #${b} tráo vị trí giữa frame ${f} và ${f+1}`)}}
+ return out}
+function collapse(list){
+ const g=new Map();for(const i of list){const k=i.id+'|'+i.kind;if(!g.has(k))g.set(k,[]);g.get(k).push(i)}
+ const out=[];for(const L of g.values()){if(L.length>5){const fs=L.map(x=>x.f).sort((a,b)=>a-b);out.push({...L[0],f:fs[0],frames:fs,detail:`${L.length} lần, frame ${fs[0]}–${fs.at(-1)}. Ví dụ: ${L[0].detail}`})}else out.push(...L)}
+ return out.sort((a,b)=>a.f-b.f)}
+
+/* ---------- biểu đồ SVG nhỏ ---------- */
+function hist(vals,{bins=30,log=false,lo,hi,vlines=[],color='#4dabf7',title='',xl=''}={}){
+ const v=vals.filter(isFinite);if(!v.length)return '';const tf=x=>log?Math.log10(Math.max(x,1e-3)):x;
+ lo=lo??Math.min(...v.map(tf));hi=hi??Math.max(...v.map(tf));if(hi<=lo)hi=lo+1;const c=new Array(bins).fill(0);for(const x of v){const i=clamp(Math.floor((tf(x)-lo)/(hi-lo)*bins),0,bins-1);c[i]++}
+ const W2=300,H2=120,mx=Math.max(...c),bw=(W2-30)/bins;let s=`<svg viewBox="0 0 ${W2} ${H2+30}" class="hist"><text x="0" y="11" class="ht">${esc(title)}</text>`;
+ c.forEach((n,i)=>{const h=n/mx*(H2-20);s+=`<rect x="${25+i*bw}" y="${H2-h}" width="${Math.max(bw-1,1)}" height="${h}" fill="${color}"><title>${n}</title></rect>`});
+ for(const [x,col] of vlines){const px=25+(tf(x)-lo)/(hi-lo)*(W2-30);if(px>=25&&px<=W2-5)s+=`<line x1="${px}" x2="${px}" y1="16" y2="${H2}" stroke="${col}" stroke-dasharray="3 2"/>`}
+ const lab=x=>log?(10**x>=100?Math.round(10**x):(10**x).toFixed(1)):(Math.abs(x)>=10?Math.round(x):x.toFixed(2));
+ s+=`<line x1="25" x2="${W2-5}" y1="${H2}" y2="${H2}" stroke="#555"/><text x="25" y="${H2+12}" class="hx">${lab(lo)}</text><text x="${W2-5}" y="${H2+12}" class="hx" text-anchor="end">${lab(hi)}</text><text x="${(W2+20)/2}" y="${H2+26}" class="hx" text-anchor="middle">${esc(xl)}</text></svg>`;
+ return s}
+
+/* ---------- nhóm B + C: quét video ---------- */
+const mkCanvas=(w,h)=>{const c=document.createElement('canvas');c.width=w;c.height=h;return c};
+function grayOf(id){const d=id.data,g=new Float32Array(id.width*id.height);for(let i=0,j=0;i<d.length;i+=4,j++)g[j]=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];return g}
+function sharp64(g){ // GaussianBlur 3x3 rồi phương sai Laplacian (giống analyze_gt.py)
+ const n=64,b=new Float32Array(n*n),at=(a,x,y)=>a[clamp(y,0,n-1)*n+clamp(x,0,n-1)];
+ for(let y=0;y<n;y++)for(let x=0;x<n;x++)b[y*n+x]=(at(g,x-1,y-1)+2*at(g,x,y-1)+at(g,x+1,y-1)+2*at(g,x-1,y)+4*at(g,x,y)+2*at(g,x+1,y)+at(g,x-1,y+1)+2*at(g,x,y+1)+at(g,x+1,y+1))/16;
+ let s=0,s2=0;for(let y=0;y<n;y++)for(let x=0;x<n;x++){const l=at(b,x-1,y)+at(b,x+1,y)+at(b,x,y-1)+at(b,x,y+1)-4*b[y*n+x];s+=l;s2+=l*l}
+ const m=s/(n*n);return s2/(n*n)-m*m}
+function meanStd(g){let s=0,s2=0;for(const v of g){s+=v;s2+=v*v}const m=s/g.length;return [m,Math.sqrt(Math.max(0,s2/g.length-m*m))]}
+function keepTop(arr,score,item,k=8){arr.push({score,item});arr.sort((a,b)=>b.score-a.score);if(arr.length>k)arr.length=k}
+
+let cvReady=null;
+// Lưu ý: đối tượng cv của OpenCV.js có hàm then() -> không được resolve Promise bằng chính cv (sẽ lặp vô hạn)
+function loadCV(){if(cvReady)return cvReady;cvReady=new Promise((res,rej)=>{
+ const ok=()=>window.cv&&typeof window.cv.Mat==='function';if(ok())return res(true);
+ const sc=document.createElement('script');sc.src='lib/opencv.js';sc.async=true;sc.onerror=()=>rej(new Error('Không tải được lib/opencv.js'));document.head.appendChild(sc);
+ const t0=Date.now();const poll=()=>{if(ok())return res(true);if(Date.now()-t0>90000)return rej(new Error('OpenCV.js khởi động quá lâu (trình duyệt có thể chặn WebAssembly ở đây)'));setTimeout(poll,200)};poll()});
+ cvReady.catch(()=>{cvReady=null});return cvReady}
+function cvWrite(cv,name,bytes){try{cv.FS_unlink('/'+name)}catch(e){}cv.FS_createDataFile('/',name,bytes,true,false,false)}
+function simT(s,d){const n=5;let sx=0,sy=0,dx=0,dy=0;for(let i=0;i<n;i++){sx+=s[2*i];sy+=s[2*i+1];dx+=d[2*i];dy+=d[2*i+1]}sx/=n;sy/=n;dx/=n;dy/=n;
+ let a=0,b=0,v=0;for(let i=0;i<n;i++){const px=s[2*i]-sx,py=s[2*i+1]-sy,qx=d[2*i]-dx,qy=d[2*i+1]-dy;a+=px*qx+py*qy;b+=px*qy-py*qx;v+=px*px+py*py}
+ const c=a/v,e=b/v;return [c,-e,dx-(c*sx-e*sy),e,c,dy-(e*sx+c*sy)]}
+const SF_DST=[38.2946,51.6963,73.5318,51.5014,56.0252,71.7366,41.5493,92.3655,70.7299,92.2041];
+
+async function scanVideo(D,opt,prog){
+ const {rows,T,F}=D,R={B:null,C:null,issues:[]};const add=(f,id,kind,detail,grp,box)=>{const it={f,id,kind,detail,grp};if(box)it.box=box;R.issues.push(it);return it};
+ const stride=Math.max(1,opt.stride|0),frames=[];for(let f=0;f<S.n;f+=stride)frames.push(f);
+ const full=mkCanvas(S.w,S.h),fg=full.getContext('2d',{willReadFrequently:true}),c64=mkCanvas(64,64),g64=c64.getContext('2d',{willReadFrequently:true}),sm=mkCanvas(160,90),gsm=sm.getContext('2d',{willReadFrequently:true}),th=mkCanvas(56,56),gth=th.getContext('2d');
+ const thumb=(b,sz=56)=>{const m=0.3*Math.max(b.w,b.h);th.width=th.height=sz;gth.fillStyle='#000';gth.fillRect(0,0,sz,sz);gth.drawImage(full,b.x-m,b.y-m,b.w+2*m,b.h+2*m,0,0,sz,sz);return th.toDataURL('image/jpeg',0.8)};
+ let cv=null,det=null,detR=null,net=null;
+ if(opt.C){prog('Đang tải OpenCV.js (~10 MB)…');await loadCV();cv=window.cv;
+  await ensureYunet(cv);
+  det=new cv.FaceDetectorYN('yunet.onnx','',new cv.Size(320,320),0.3,0.3,5000);detR=new cv.FaceDetectorYN('yunet.onnx','',new cv.Size(320,320),0.3,0.3,5000);
+  if(GT.sfaceBytes){cvWrite(cv,'sface.onnx',GT.sfaceBytes);net=cv.readNet('sface.onnx')}}
+ const B={attrs:[],samples:{'mờ nhất':[],'ngẫu nhiên':[],'nét nhất':[],'tối nhất':[]},dups:[],cuts:[]};
+ const C={bias:[],missing:[],notface:[],thumbsMiss:[],thumbsNot:[],land:new Map(),pairs:[]};
+ let prevSm=null,prevNorm=null,openSeg=[];
+ const runDet=(detector,mat,longSide)=>{let k=1,img=mat,tmp=null;if(longSide&&Math.max(mat.cols,mat.rows)>longSide){k=longSide/Math.max(mat.cols,mat.rows);tmp=new cv.Mat();cv.resize(mat,tmp,new cv.Size(Math.round(mat.cols*k),Math.round(mat.rows*k)));img=tmp}
+  detector.setInputSize(new cv.Size(img.cols,img.rows));const out=new cv.Mat();detector.detect(img,out);const res=[];for(let i=0;i<out.rows;i++){const r=Array.from(out.data32F.slice(i*15,i*15+15));for(let j=0;j<14;j++)r[j]/=k;res.push(r)}out.delete();if(tmp)tmp.delete();return res};
+ const asBox=r=>({x:r[0],y:r[1],w:r[2],h:r[3]});
+ for(let n=0;n<frames.length;n++){
+  if(GT.cancel)throw new Error('Đã hủy');const f=frames[n];if(n%3===0)prog(`Đang quét frame ${f} (${n+1}/${frames.length})`,n/frames.length);
+  await src.seek(f);fg.drawImage(src.image,0,0,S.w,S.h);
+  if(opt.B){gsm.drawImage(src.image,0,0,160,90);const g=grayOf(gsm.getImageData(0,0,160,90)),[m,sd]=meanStd(g),nm=g.map(v=>(v-m)/(sd+1e-6));
+   if(prevSm&&stride===1){let d=0,ncc=0;for(let i=0;i<g.length;i++){d+=Math.abs(g[i]-prevSm[i]);ncc+=nm[i]*prevNorm[i]}d/=g.length;ncc/=g.length;if(d<0.3)B.dups.push(f);else if(ncc<0.5)B.cuts.push(f)}
+   else if(prevSm){let ncc=0;for(let i=0;i<g.length;i++)ncc+=nm[i]*prevNorm[i];if(ncc/g.length<0.5)B.cuts.push(f)}prevSm=g;prevNorm=nm;
+   for(const i of F.get(f)||[]){const r=rows[i];if(r.w<4||r.h<4)continue;g64.drawImage(full,r.x,r.y,r.w,r.h,0,0,64,64);const gg=grayOf(g64.getImageData(0,0,64,64)),sh=sharp64(gg),[br,ct]=meanStd(gg);
+    const bc=sh<opt.blurThr?'mờ':sh>opt.sharpThr?'nét':'vừa',lc=br<opt.darkThr?'tối':br>200?'chói':'bình thường';B.attrs.push({frame:f,id:r.id,h:+r.h.toFixed(1),sharpness:+sh.toFixed(1),brightness:+br.toFixed(1),contrast:+ct.toFixed(1),blur:bc,light:lc});
+    const it=()=>({src:thumb(r),cap:`f${f} #${r.id}`});
+    for(const [k,sc] of [['mờ nhất',-sh],['nét nhất',sh],['tối nhất',-br],['ngẫu nhiên',Math.random()]]){const a=B.samples[k];if(a.length<8||sc>a.at(-1).score)keepTop(a,sc,{...it(),val:k==='tối nhất'?`sáng ${br.toFixed(0)}`:`nét ${sh.toFixed(0)}`})}
+    if(ct<opt.flatThr&&br>opt.darkThr)add(f,r.id,'box trên vùng đồng màu',`độ tương phản ${ct.toFixed(1)}: box có thể nằm trên tường / vật che`,'B')}}
+  if(opt.C){const rgba=cv.matFromImageData(fg.getImageData(0,0,S.w,S.h)),bgr=new cv.Mat();cv.cvtColor(rgba,bgr,cv.COLOR_RGBA2BGR);rgba.delete();
+   const Dt=runDet(det,bgr,opt.longSide),G=(F.get(f)||[]).map(i=>rows[i]);if(MD.src!=='YuNet (quét Đánh giá GT)'||!MD.dets.size){mdReset(false,stride);MD.src='YuNet (quét Đánh giá GT)'}MD.step=stride;mdSet(f,Dt.map(mdFromRow));
+   const M=Dt.map(d=>G.map(g=>iou(asBox(d),g)));
+   G.forEach((g,j)=>{let k=-1,bo=0;Dt.forEach((d,i)=>{if(M[i][j]>bo){bo=M[i][j];k=i}});
+    if(k>=0&&bo>=0.5&&Dt[k][14]>=0.6){const d=Dt[k];C.bias.push([(g.x+g.w/2-d[0]-d[2]/2)/d[2],(g.y+g.h/2-d[1]-d[3]/2)/d[3],g.w/d[2],g.h/d[3],bo]);
+     if(d[14]>=0.8&&g.h>=40){if(!C.land.has(g.id))C.land.set(g.id,[]);C.land.get(g.id).push({f,d})}}
+    if(g.h>=opt.minFace&&!(k>=0&&bo>=0.3)){ // C2: crop vùng quanh box, đưa mặt về ~96px, detect lại
+     const sd=2*Math.max(g.w,g.h),x0=Math.max(0,Math.round(g.x+g.w/2-sd/2)),y0=Math.max(0,Math.round(g.y+g.h/2-sd/2)),x1=Math.min(S.w,Math.round(g.x+g.w/2+sd/2)),y1=Math.min(S.h,Math.round(g.y+g.h/2+sd/2));
+     let found=false;if(x1-x0>8&&y1-y0>8){const roi=bgr.roi(new cv.Rect(x0,y0,x1-x0,y1-y0)),kk=clamp(96/Math.max(g.w,g.h),0.25,6),rs=new cv.Mat();cv.resize(roi,rs,new cv.Size(Math.max(8,Math.round(roi.cols*kk)),Math.max(8,Math.round(roi.rows*kk))));
+      const RR=runDet(detR,rs,0);found=RR.some(r=>iou({x:r[0]/kk+x0,y:r[1]/kk+y0,w:r[2]/kk,h:r[3]/kk},g)>=0.3);roi.delete();rs.delete()}
+     if(!found){C.notface.push({f,id:g.id});add(f,g.id,'box GT không thấy mặt','model không tìm thấy mặt kể cả khi crop phóng to: vẽ nhầm vào nền / vật? (hoặc mặt quá nghiêng / quá tối)','C');if(C.thumbsNot.length<8)C.thumbsNot.push({src:thumb(g),cap:`f${f} #${g.id}`})}}});
+   let cand=Dt.filter((d,i)=>d[14]>=opt.missScore&&!(G.length&&Math.max(...M[i])>=0.3));const still=[];
+   for(const s of openSeg){const hi=cand.findIndex(c=>iou(asBox(c),asBox(s.last))>=0.3);if(hi>=0){s.last=cand[hi];s.end=f;s.n++;s.score+=cand[hi][14];cand.splice(hi,1);still.push(s)}else if(f-s.end>2*stride)C.missing.push(s);else still.push(s)}
+   for(const c of cand)still.push({start:f,end:f,n:1,score:c[14],last:c,first:c,thumb:thumb(asBox(c))});openSeg=still;bgr.delete()}
+  await new Promise(r=>setTimeout(r,0))}
+ if(opt.C){C.missing.push(...openSeg);C.missing=C.missing.filter(m=>m.n>=opt.minLen);
+  for(const m of C.missing){const b=m.first;add(m.start,-1,'mặt thiếu nhãn trong GT',`model thấy mặt (score ${(m.score/m.n).toFixed(2)}) ở frame ${m.start}–${m.end} tại x=${b[0].toFixed(0)}, y=${b[1].toFixed(0)}, nhưng GT không có box`,'C',{x:b[0],y:b[1],w:b[2],h:b[3]});if(C.thumbsMiss.length<8)C.thumbsMiss.push({src:m.thumb,cap:`f${m.start}–${m.end}`})}
+  // C4/C5: embedding SFace
+  if(net){const want=new Map();for(const [id,L] of C.land){const k=Math.min(2*opt.samples,L.length);for(let t=0;t<k;t++){const it=L[Math.round(t*(L.length-1)/Math.max(1,k-1))];if(!want.has(it.f))want.set(it.f,[]);want.get(it.f).push({id,d:it.d})}}
+   const Fe=new Map(),fl=[...want.keys()].sort((a,b)=>a-b);
+   for(let n=0;n<fl.length;n++){if(GT.cancel)throw new Error('Đã hủy');const f=fl[n];prog(`Đang tính embedding mặt (${n+1}/${fl.length})`,n/fl.length);await src.seek(f);fg.drawImage(src.image,0,0,S.w,S.h);
+    const rgba=cv.matFromImageData(fg.getImageData(0,0,S.w,S.h)),bgr=new cv.Mat();cv.cvtColor(rgba,bgr,cv.COLOR_RGBA2BGR);rgba.delete();
+    for(const {id,d} of want.get(f)){const Mx=cv.matFromArray(2,3,cv.CV_64F,simT(d.slice(4,14),SF_DST)),al=new cv.Mat();cv.warpAffine(bgr,al,Mx,new cv.Size(112,112));
+     const gr=new cv.Mat(),g64m=new cv.Mat();cv.cvtColor(al,gr,cv.COLOR_BGR2GRAY);cv.resize(gr,g64m,new cv.Size(64,64),0,0,cv.INTER_AREA);const sh=sharp64(Float32Array.from(g64m.data));
+     if(sh>=opt.blurThr){const blob=cv.blobFromImage(al,1,new cv.Size(112,112),new cv.Scalar(0,0,0),true,false);net.setInput(blob);const o=net.forward(),e=Array.from(o.data32F),nr=Math.hypot(...e);
+      const rgb=new cv.Mat();cv.cvtColor(al,rgb,cv.COLOR_BGR2RGBA);const tc=mkCanvas(112,112);tc.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(rgb.data),112,112),0,0);
+      if(!Fe.has(id))Fe.set(id,[]);Fe.get(id).push({f,e:e.map(v=>v/nr),img:tc.toDataURL('image/jpeg',0.85)});blob.delete();o.delete();rgb.delete()}
+     Mx.delete();al.delete();gr.delete();g64m.delete()}bgr.delete();await new Promise(r=>setTimeout(r,0))}
+   const dot=(a,b)=>a.reduce((s,v,i)=>s+v*b[i],0),mean=L=>{const m=L[0].e.map((_,j)=>L.reduce((s,x)=>s+x.e[j],0)/L.length),n=Math.hypot(...m);return m.map(v=>v/n)};
+   const span=new Map([...T].map(([id,L])=>[id,new Set(L.map(i=>rows[i].f))]));
+   for(const [id,L] of Fe){L.sort((a,b)=>a.f-b.f);let best=null;for(let k=2;k<L.length-1;k++){const c=dot(mean(L.slice(0,k)),mean(L.slice(k)));if(!best||c<best[0])best=[c,k]}
+    if(best&&best[0]<opt.diffThr){const [c,k]=best;add(L[k].f,id,'1 ID chứa 2 người?',`mặt trước frame ${L[k-1].f} và từ frame ${L[k].f} khác nhau rõ rệt (cosine ${c.toFixed(2)} < ${opt.diffThr})`,'C');C.pairs.push({kind:'1 ID 2 người',a:L[k-1],b:L[k],ida:id,idb:id,cos:c})}}
+   const ids=[...Fe.keys()].sort((a,b)=>a-b);
+   for(let x=0;x<ids.length;x++)for(let y=x+1;y<ids.length;y++){const a=ids[x],b=ids[y],sa=span.get(a),sb=span.get(b);let ov=false;for(const f of sa)if(sb.has(f)){ov=true;break}if(ov)continue;
+    const c=dot(mean(Fe.get(a)),mean(Fe.get(b)));if(c>opt.sameThr){const later=Math.min(...sb)>Math.min(...sa)?b:a;add(Math.min(...span.get(later)),later,'cùng người nhưng 2 ID',`#${a} và #${b} không xuất hiện cùng lúc, mặt giống nhau (cosine ${c.toFixed(2)} > ${opt.sameThr})`,'C');C.pairs.push({kind:'cùng người 2 ID',a:Fe.get(a)[0],b:Fe.get(b)[0],ida:a,idb:b,cos:c})}}
+   net.delete()}
+  det.delete();detR.delete()}
+ if(opt.B){if(B.dups.length)add(B.dups[0],-1,'frame lặp',`${B.dups.length} frame giống hệt frame trước: video bị giật / ghép?`,'B');
+  for(const c of B.cuts){const before=new Set((F.get(c-stride)||[]).map(i=>rows[i].id));for(const i of F.get(c)||[])if(before.has(rows[i].id))add(c,rows[i].id,'ID đi qua cắt cảnh','cảnh đổi đột ngột nhưng ID vẫn giữ: đúng là cùng người?','B')}}
+ R.B=opt.B?B:null;R.C=opt.C?C:null;return R}
+
+/* ---------- chạy + hiển thị ---------- */
+function showGT(){
+ if(!src)return toast('Hãy mở video trước');if(playing)togglePlay();
+ const lopts=S.labels.map(l=>`<option value="${l.id}"${/face|mặt/i.test(l.name)?' selected':''}>${esc(l.name)}</option>`).join('');
+ const st=Math.max(1,Math.round(S.n/600));
+ openModal('Đánh giá ground truth',`<div class="gtcfg">
+  <label>Nhãn <select class="btn" id="gtLab"><option value="0">Tất cả box/polygon</option>${lopts}</select></label>
+  <label class="chk"><input type="checkbox" id="gtB" checked>Nhóm B: chất lượng ảnh (đọc pixel video)</label>
+  <label class="chk"><input type="checkbox" id="gtC">Nhóm C: đối chiếu bằng YuNet</label>
+  <label>Quét mỗi <input class="num" id="gtStride" type="number" min="1" value="${st}"> frame</label>
+  <label>SFace (tuỳ chọn, cho C4/C5) <button class="btn" id="gtSfBtn">${GT.sfaceBytes?'Đã chọn ✓':'Chọn file .onnx…'}</button></label>
+  <details><summary class="mut">Ngưỡng</summary><div class="gtth">
+   <label>Mờ &lt;<input class="num" id="gtBlur" value="60"></label><label>Nét &gt;<input class="num" id="gtSharp" value="150"></label><label>Tối &lt;<input class="num" id="gtDark" value="50"></label><label>Phẳng &lt;<input class="num" id="gtFlat" value="10"></label>
+   <label>Score thiếu nhãn ≥<input class="num" id="gtMiss" value="0.8"></label><label>Đoạn ≥<input class="num" id="gtMinLen" value="3"> lần quét</label><label>Box ≥<input class="num" id="gtMinFace" value="32">px</label>
+   <label>Cùng người cos &gt;<input class="num" id="gtSame" value="0.363"></label><label>Khác người cos &lt;<input class="num" id="gtDiff" value="0.2"></label><label>Cạnh dài input<input class="num" id="gtLong" value="1280"></label></div></details>
+  <div class="row"><button class="btn primary" id="gtRun">Chạy phân tích</button><button class="btn" id="gtStop" hidden>Dừng</button><button class="btn" id="gtExport" ${GT.res?'':'disabled'}>Tải báo cáo (.zip)</button></div>
+  <div id="gtProg" hidden><div class="pbar"><i></i></div><span class="mut" id="gtProgTxt"></span></div>
+  <div class="note">Nhóm A và kiểm tra nhãn chạy tức thì. Nhóm B, C phải tua qua video nên mất thời gian hơn; tăng "Quét mỗi n frame" để nhanh hơn (frame lặp chỉ phát hiện được khi n = 1). Số frame ở đây đếm từ 0, giống thanh timeline.</div></div>
+  <div id="gtOut">${GT.res?renderGT(GT.res):''}</div>`);
+ $('#modal').classList.add('wide');
+ $('#gtSfBtn').onclick=()=>$('#gtSfIn').click();
+ $('#gtRun').onclick=runGT;$('#gtStop').onclick=()=>{GT.cancel=true};$('#gtExport').onclick=exportGT;wireGT();
+}
+$('#gtSfIn').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;GT.sfaceBytes=new Uint8Array(await f.arrayBuffer());const b=$('#gtSfBtn');if(b)b.textContent='Đã chọn ✓ '+f.name;toast('Đã nạp '+f.name)};
+async function runGT(){
+ if(GT.running)return;const g=id=>+$(id).value;const opt={label:g('#gtLab'),B:$('#gtB').checked,C:$('#gtC').checked,stride:g('#gtStride'),blurThr:g('#gtBlur'),sharpThr:g('#gtSharp'),darkThr:g('#gtDark'),flatThr:g('#gtFlat'),
+  missScore:g('#gtMiss'),minLen:g('#gtMinLen'),minFace:g('#gtMinFace'),sameThr:g('#gtSame'),diffThr:g('#gtDiff'),longSide:g('#gtLong'),samples:8};
+ const D=gtData(opt.label||0);if(!D.rows.length)return toast('Không có box nào với nhãn này');
+ GT.running=true;GT.cancel=false;$('#gtRun').disabled=true;$('#gtStop').hidden=false;const pg=$('#gtProg');pg.hidden=false;
+ const prog=(t,p)=>{$('#gtProgTxt').textContent=t;if(p!=null)pg.querySelector('i').style.width=(p*100).toFixed(1)+'%'};
+ const keepF=S.frame;let res;
+ try{prog('Đang tính thống kê và nhóm A…',0);await new Promise(r=>setTimeout(r,20));
+  const st=stats(D),iss=labelChecks(D);let scan={issues:[],B:null,C:null};
+  if(opt.B||opt.C)scan=await scanVideo(D,opt,prog);
+  res={opt,st,scan,issues:collapse([...iss,...scan.issues]),when:new Date().toLocaleString()};if(opt.C)updModelSide();GT.res=res;GT.issues=res.issues;GT.cur=-1;
+  $('#gtOut').innerHTML=renderGT(res);wireGT();$('#gtExport').disabled=false;prog(`Xong: ${res.issues.length} nghi vấn`,1);renderGTSide();drawTimeline()}
+ catch(e){prog('Lỗi: '+(typeof e==='number'&&window.cv?.exceptionFromPtr?cv.exceptionFromPtr(e).msg:(e.message||e)));console.error(e)}
+ finally{GT.running=false;$('#gtRun').disabled=false;$('#gtStop').hidden=true;await src.seek(keepF);S.frame=keepF;render();updFrameUI()}}
+function findings(r){
+ const st=r.st,bi=st.byInput,out=[];
+ out.push(`Ở input 640, <b>${P1(bi['640']['<10'])}</b> mặt nhỏ hơn 10 px (YuNet gần như không thấy); ở native là <b>${P1(bi.native['<10'])}</b>. Cỡ input giữ nhiều mặt trong vùng 10–300 px nhất: <b>${st.suggestSize}</b>.`);
+ if(bi.native['>300']>0.01)out.push(`${P1(bi.native['>300'])} mặt lớn hơn 300 px: nên thu nhỏ ảnh trước khi detect.`);
+ out.push(`${P1(st.iouLt03)} cặp frame liên tiếp có IoU &lt; 0,3: `+(st.iouLt03>0.05?'tracker chỉ dùng IoU sẽ hay mất dấu, cần Kalman tốt / CMC.':'chuyển động chậm, tracker IoU + Kalman là đủ.'));
+ if(isFinite(st.cam))out.push(`${P1(st.cam)} frame có mọi người cùng dịch một hướng: `+(st.cam>0.2?'camera lia / rung, nên bật CMC.':'camera khá ổn định.'));
+ out.push(`${st.reapp} lần một ID vắng hơn 1 giây rồi quay lại`+(st.reapp?': cần gộp tracklet dài hạn (HAC).':'.'));
+ const nc=st.events.filter(e=>e.crossed).length;out.push(`${st.events.length} đoạn 2 người sát nhau, ${nc} đoạn đi ngang qua nhau`+(nc?': nơi dễ đổi ID nhất, nên có ReID.':'.'));
+ const B=r.scan.B;if(B&&B.attrs.length){const n=B.attrs.length,c=k=>B.attrs.filter(a=>a.blur===k||a.light===k).length/n;out.push(`Trong box GT: <b>${P1(c('mờ'))}</b> mờ, <b>${P1(c('tối'))}</b> tối, ${P1(c('chói'))} chói.`+(B.cuts.length?` ${B.cuts.length} lần cắt cảnh.`:''))}
+ const C=r.scan.C;if(C){if(C.bias.length>=20){const m=k=>med(C.bias.map(b=>b[k])),sw=m(2),sh=m(3),dy=m(1),dev=Math.max(Math.abs(sw-1),Math.abs(sh-1),Math.abs(m(0)),Math.abs(dy));
+   out.push(`Quy ước box: IoU trung vị GT–model ${m(4).toFixed(2)}. `+(dev>0.08?`<b>Lệch quy ước</b>: box GT ${(sw+sh)/2>1?'to':'nhỏ'} hơn box model ~${Math.abs((sw+sh)/2-1)*100|0}%, tâm lệch dọc ${(dy*100).toFixed(0)}%.`:'Cùng quy ước với model.'))}
+  if(C.missing.length)out.push(`<b>${C.missing.length}</b> đoạn mặt có thể bị thiếu nhãn (model thấy rõ nhưng GT không có).`);if(C.notface.length)out.push(`${C.notface.length} box GT mà model không thấy mặt.`);
+  if(C.pairs.length)out.push(`Danh tính: ${C.pairs.filter(p=>p.kind==='cùng người 2 ID').length} cặp ID có thể là cùng người, ${C.pairs.filter(p=>p.kind!=='cùng người 2 ID').length} ID có thể chứa 2 người.`)}
+ out.push(`<b>${r.issues.length}</b> nghi vấn: bấm vào từng dòng để nhảy tới frame và chọn đúng track.`);return out}
+const tbl=(rows,cols)=>rows.length?`<div class="gtt"><table><tr>${cols.map(c=>`<th>${esc(c[0])}</th>`).join('')}</tr>${rows.map(r=>`<tr>${cols.map(c=>`<td>${c[1](r)}</td>`).join('')}</tr>`).join('')}</table></div>`:'<div class="mut">Không có.</div>';
+const thumbs=L=>L.length?`<div class="gtthumbs">${L.map(t=>`<figure><img src="${t.src}"><figcaption>${esc(t.cap)}${t.val?'<br>'+esc(t.val):''}</figcaption></figure>`).join('')}</div>`:'';
+function renderGT(r){
+ const st=r.st,o=st.overview,kinds={};r.issues.forEach(i=>kinds[i.kind]=(kinds[i.kind]||0)+(i.frames?i.frames.length:1));
+ let h=`<div class="gtbox"><b>Kết luận nhanh</b> <span class="mut">(${esc(r.when)})</span><ul>${findings(r).map(x=>`<li>${x}</li>`).join('')}</ul>
+  <b>Tham số gợi ý cho eval_face_postproc.py</b><br><code>--size ${st.suggestSize} --max-gap ${st.maxGap}</code> · tracker max_lost=${st.maxLost}, iou1=${st.iou1} · lọc hình học ar=[${st.suggestAr.join(', ')}]</div>`;
+ h+=`<h4>Nghi vấn (${r.issues.length})</h4><div class="gtfilter"><select class="btn" id="gtKind"><option value="">Tất cả loại</option>${Object.entries(kinds).map(([k,n])=>`<option value="${esc(k)}">${esc(k)} (${n})</option>`).join('')}</select></div>
+  <div class="gtt" id="gtIssues">${issueRows(r.issues)}</div>`;
+ h+=`<h4>1. Tổng quan</h4>${tbl([o],[['Video',x=>esc(x.video)],['Độ phân giải',x=>x.res],['FPS',x=>x.fps],['Frame',x=>x.frames],['Frame có nhãn',x=>x.labeled],['Box',x=>x.boxes],['ID',x=>x.ids],['Mặt/frame TB',x=>x.mean],['Tối đa',x=>x.max]])}`;
+ h+=`<h4>2. Kích thước mặt</h4><div class="gtcharts">${hist(st.side,{log:true,vlines:[[10,'#ff6b6b'],[24,'#888'],[64,'#888'],[300,'#ff6b6b']],title:'Cỡ mặt ở độ phân giải gốc (px, log)',xl:'cạnh dài box'})}</div>
+  ${tbl(Object.entries(st.byInput).map(([k,v])=>({k,...v})),[['Input',x=>x.k],...SIZE_NAMES.map(n=>[n,x=>P1(x[n])]),['Trong 10–300',x=>'<b>'+P1(x.inRange)+'</b>']])}`;
+ h+=`<h4>3. Hình dạng &amp; vị trí</h4><p>w/h (phân vị 0,5/5/50/95/99,5): ${st.arP.map(x=>x.toFixed(2)).join(', ')} → ngưỡng gợi ý <b>[${st.suggestAr.join(', ')}]</b>. Mặt chạm mép: ${P1(st.edge)}.</p>
+  <div class="gtcharts">${hist(st.ar,{title:'Tỉ lệ w/h',vlines:st.suggestAr.map(x=>[x,'#ff6b6b']),color:'#cc5de8'})}${hist(st.cx,{lo:0,hi:1,title:'Vị trí ngang của tâm mặt',xl:'x / width',color:'#20c997'})}</div>`;
+ h+=`<h4>4. Thời gian &amp; track</h4><p>Khoảng trống bên trong ID: ${st.gaps.length} lần. Gợi ý <code>max_gap</code> = ${st.maxGap}, <code>max_lost</code> = ${st.maxLost}. Vắng &gt; 1 giây rồi quay lại: ${st.reapp} lần.</p>
+  <div class="gtcharts">${hist(st.lens,{title:'Độ dài track (số box / ID)',color:'#748ffc'})}${st.gaps.length?hist(st.gaps,{title:'Khoảng trống trong 1 ID (frame)',vlines:[[st.maxGap,'#51cf66'],[st.maxLost,'#ff6b6b']],color:'#fcc419'}):''}</div>`;
+ h+=`<h4>5. Chuyển động</h4><p>IoU cùng ID giữa 2 frame liên tiếp &lt; 0,3: <b>${P1(st.iouLt03)}</b>. Dấu hiệu camera lia: ${P1(st.cam)}.</p><div class="gtcharts">${hist(st.ious,{lo:0,hi:1,title:'IoU cùng ID giữa 2 frame',vlines:[[0.3,'#ff6b6b']],color:'#51cf66'})}${hist(st.disp.map(x=>Math.min(x,2)),{lo:0,hi:2,title:'Độ dịch tâm / chiều cao mặt',color:'#ff922b'})}</div>`;
+ h+=`<h4>6. Tương tác giữa các ID</h4>${tbl(st.events.slice(0,15),[['ID',e=>`#${e.id1} – #${e.id2}`],['Frame',e=>`<a href="#" data-go="${e.start}">${e.start}–${e.end}</a>`],['IoU max',e=>e.maxIou.toFixed(2)],['Đi ngang',e=>e.crossed?'<b>có</b>':'']])}`;
+ const B=r.scan.B;if(B){const n=B.attrs.length||1,c=k=>B.attrs.filter(a=>a.blur===k||a.light===k).length/n;
+  h+=`<h4>9. Chất lượng ảnh trong box</h4><p>Mờ ${P1(c('mờ'))} · vừa ${P1(c('vừa'))} · nét ${P1(c('nét'))} · tối ${P1(c('tối'))} · chói ${P1(c('chói'))}. Nhìn ảnh mẫu để chỉnh ngưỡng: nếu hàng "mờ nhất" vẫn rõ thì hạ ngưỡng Mờ.</p>
+  <div class="gtcharts">${hist(B.attrs.map(a=>a.sharpness),{log:true,title:'Độ nét (log)',vlines:[[r.opt.blurThr,'#ff6b6b'],[r.opt.sharpThr,'#51cf66']],color:'#748ffc'})}${hist(B.attrs.map(a=>a.brightness),{lo:0,hi:255,title:'Độ sáng',vlines:[[r.opt.darkThr,'#ff6b6b'],[200,'#ff6b6b']],color:'#fcc419'})}</div>
+  ${Object.entries(B.samples).map(([k,L])=>`<div class="mut">${k}</div>${thumbs(L.map(x=>x.item))}`).join('')}
+  <p>Cắt cảnh: ${B.cuts.length?B.cuts.map(f=>`<a href="#" data-go="${f}">${f}</a>`).join(', '):'không có'} · Frame lặp: ${B.dups.length}</p>`}
+ const C=r.scan.C;if(C){h+=`<h4>10. Đối chiếu bằng model</h4>`;
+  if(C.bias.length>=20){const m=k=>med(C.bias.map(b=>b[k]));h+=`<p>${C.bias.length} cặp box GT–model khớp. Trung vị: w_GT/w_model = <b>${m(2).toFixed(2)}</b>, h_GT/h_model = <b>${m(3).toFixed(2)}</b>, lệch tâm ngang ${(m(0)*100).toFixed(1)}%, dọc ${(m(1)*100).toFixed(1)}%, IoU ${m(4).toFixed(2)}.</p>
+   <div class="gtcharts">${hist(C.bias.map(b=>b[2]),{title:'w_GT / w_model',vlines:[[1,'#888']],color:'#20c997'})}${hist(C.bias.map(b=>b[3]),{title:'h_GT / h_model',vlines:[[1,'#888']],color:'#cc5de8'})}</div>`}
+  h+=`<div class="mut">Mặt thiếu nhãn trong GT (${C.missing.length} đoạn)</div>${thumbs(C.thumbsMiss)}<div class="mut">Box GT không thấy mặt (${C.notface.length} box)</div>${thumbs(C.thumbsNot)}`;
+  if(C.pairs.length)h+=`<div class="mut">Kiểm tra danh tính</div><div class="gtpairs">${C.pairs.map(p=>`<div><img src="${p.a.img}"><img src="${p.b.img}"><span>${esc(p.kind)}<br>#${p.ida} f${p.a.f} · #${p.idb} f${p.b.f}<br>cos ${p.cos.toFixed(2)}</span></div>`).join('')}</div>`;
+  else if(!GT.sfaceBytes)h+=`<p class="mut">Chọn file SFace (face_recognition_sface_2021dec.onnx) để kiểm tra cùng người 2 ID / 1 ID 2 người.</p>`}
+ return h}
+function issueRows(L){return L.length?`<table><tr><th>Frame</th><th>ID</th><th>Loại</th><th>Chi tiết</th></tr>${L.map(i=>`<tr class="gti g${i.grp}" data-i="${GT.issues.indexOf(i)}"><td>${i.f}</td><td>${i.id>=0?'#'+i.id:'–'}</td><td>${esc(i.kind)}</td><td>${esc(i.detail)}</td></tr>`).join('')}</table>`:'<div class="mut">Không có nghi vấn nào.</div>'}
+function wireGT(){const out=$('#gtOut');if(!out)return;
+ out.onclick=e=>{const tr=e.target.closest('tr.gti');if(tr){gotoIssue(+tr.dataset.i);closeModal();return}const a=e.target.closest('[data-go]');if(a){e.preventDefault();closeModal();goFrame(+a.dataset.go)}};
+ const k=$('#gtKind');if(k)k.onchange=()=>{$('#gtIssues').innerHTML=issueRows(GT.issues.filter(i=>!k.value||i.kind===k.value))}}
+function gotoIssue(i){if(i<0||i>=GT.issues.length)return;GT.cur=i;const it=GT.issues[i];GT.hl=it.box?{f:it.f,box:it.box}:null;if(it.id>=0&&S.tracks.some(t=>t.id===it.id))sel=it.id;goFrame(it.f);changed(false);renderGTSide()}
+function renderGTSide(){const el=$('#gtSide');if(!el)return;if(!GT.issues.length){el.hidden=true;return}el.hidden=false;const i=GT.cur,it=GT.issues[i];
+ el.querySelector('.gtnav span').textContent=`${i>=0?i+1:'–'} / ${GT.issues.length}`;el.querySelector('.gtdesc').innerHTML=it?`<b>f${it.f}${it.id>=0?' · #'+it.id:''}</b> ${esc(it.kind)}<br><span class="mut">${esc(it.detail)}</span>`:'<span class="mut">Bấm ▶ để đi tới nghi vấn đầu tiên.</span>'}
+function drawGTMarks(X,h){if(!GT.issues.length)return;tctx.fillStyle='#ff922b';const seen=new Set();for(const it of GT.issues)for(const f of it.frames||[it.f]){const x=Math.round(X(f+.5));if(seen.has(x))continue;seen.add(x);tctx.fillRect(x-1,h-5,2,5)}}
+async function exportGT(){const r=GT.res;if(!r)return;const csv=(rows)=>{if(!rows.length)return'';const k=Object.keys(rows[0]);return '﻿'+[k.join(','),...rows.map(x=>k.map(c=>{const v=String(x[c]??'');return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v}).join(','))].join('\n')};
+ const files={'issues.csv':csv(r.issues.map(i=>({frame:i.f,id:i.id,group:i.grp,issue:i.kind,detail:i.detail}))),'events.csv':csv(r.st.events.map(e=>({id1:e.id1,id2:e.id2,start:e.start,end:e.end,max_iou:e.maxIou.toFixed(3),crossed:e.crossed}))),'ids.csv':csv(r.st.perId),
+  'suggested_params.json':JSON.stringify({cli:{size:r.st.suggestSize,max_gap:r.st.maxGap},tracker:{max_lost:r.st.maxLost,iou1:r.st.iou1},geometry:{ar:r.st.suggestAr}},null,2),
+  'report.html':`<!DOCTYPE html><meta charset="utf-8"><title>Đánh giá GT – ${esc(S.name)}</title><style>${GT_CSS_EXPORT}</style><body><h1>Đánh giá GT – ${esc(S.name)}</h1>${renderGT(r)}</body>`};
+ if(r.scan.B)files['attrs.csv']=csv(r.scan.B.attrs);if(r.scan.C)files['missing_in_gt.csv']=csv(r.scan.C.missing.map(m=>({start:m.start,end:m.end,x:m.first[0].toFixed(0),y:m.first[1].toFixed(0),w:m.first[2].toFixed(0),h:m.first[3].toFixed(0),mean_score:(m.score/m.n).toFixed(2)})));
+ const base=(S.name||'video')+'_gt_';
+ if(window.JSZip)return saveFile(await zipBlob(files),base+'report.zip');
+ // không có JSZip (chạy offline): tải từng file
+ for(const [k,v] of Object.entries(files)){await saveFile(v,base+k);await new Promise(r=>setTimeout(r,400))}}
+
+const GT_CSS_EXPORT=`body{font:14px/1.6 system-ui,sans-serif;max-width:1000px;margin:auto;padding:20px;color:#1f1e1d;background:#faf9f5}h4{margin:22px 0 6px;border-bottom:1px solid #ddd}
+.gtt table{border-collapse:collapse;font-size:12px}.gtt td,.gtt th{border:1px solid #ddd;padding:3px 6px;text-align:left}.mut{color:#777}.gtbox{background:#fff;border:1px solid #ddd;border-radius:8px;padding:8px 14px}
+.gtcharts{display:flex;flex-wrap:wrap;gap:10px}.hist{width:300px;background:#fff}.ht,.hx{font-size:10px;fill:#555}.gtthumbs{display:flex;flex-wrap:wrap;gap:6px}.gtthumbs figure{margin:0;font-size:10px;text-align:center}
+.gtpairs div{display:flex;gap:6px;align-items:center;margin:4px 0}.gtpairs img{width:72px}code{background:#eee;padding:1px 4px}.gtfilter{display:none}`;
+
+
+/* =====================================================================
+   BOX MODEL: hiển thị box do model dự đoán chồng lên GT
+   nguồn: YuNet chạy trong trình duyệt (frame này / tự chạy / quét Đánh giá GT)
+          hoặc file kết quả (MOT: frame,id,x,y,w,h,score[,10 landmark]; XML Video/Trajectory; JSONL sample_id + object[bbox])
+   ===================================================================== */
+const MD={dets:new Map(),keys:[],full:false,step:1,src:'',show:true,thr:0.5,live:false,busy:false,det:null,prev:null,infoT:0};
+/* Các frame đã có kết quả model được giữ trong MD.keys (đã sắp xếp).
+   full=true (file nhập): mọi frame đều coi là đã chạy -> frame không có box = model không thấy mặt.
+   full=false (quét theo bước / chạy từng frame): frame chưa chạy thì giữ box của frame gần nhất trước đó. */
+function mdSet(f,arr){if(!MD.dets.has(f)){let lo=0,hi=MD.keys.length;while(lo<hi){const m=(lo+hi)>>1;if(MD.keys[m]<f)lo=m+1;else hi=m}MD.keys.splice(lo,0,f)}MD.dets.set(f,arr)}
+function mdReset(full,step){if(typeof evClear==='function')evClear();MD.dets=new Map();MD.keys=[];MD.full=!!full;MD.step=step||1;MD.prev=null;MD.gen=(MD.gen||0)+1} // gen: bỏ qua kết quả của phiên cũ
+function mdHoldLimit(){return MD.live?Math.max(MD.step,2*(LA?.step||1),Math.round(S.fps/2)):Math.max(0,MD.step-1)}
+function mdAt(f){ // -> {D, held, from} hoặc null
+ if(MD.dets.has(f))return {D:MD.dets.get(f),held:false,from:f};if(MD.full)return null;
+ let lo=0,hi=MD.keys.length;while(lo<hi){const m=(lo+hi)>>1;if(MD.keys[m]<=f)lo=m+1;else hi=m}const k=MD.keys[lo-1];
+ if(k===undefined||f-k>mdHoldLimit())return null;
+ // bù chuyển động: ước lượng vận tốc từ kết quả trước đó (j < k), dời box tới frame f
+ const j=MD.keys[lo-2],Dk=MD.dets.get(k);if(j===undefined||k-j>2*Math.max(1,mdHoldLimit()))return {D:Dk,held:true,from:k};
+ const Dj=MD.dets.get(j),dt=(f-k)/(k-j);
+ const D=Dk.map(d=>{let best=null,bo=0.3;for(const e of Dj){const o=iou(d,e);if(o>bo){bo=o;best=e}}if(!best)return d;
+  const dx=(d.x+d.w/2-best.x-best.w/2)*dt,dy=(d.y+d.h/2-best.y-best.h/2)*dt,sc=Math.max(0.8,Math.min(1.25,1+(d.h/best.h-1)*dt));
+  const w=d.w*sc,h=d.h*sc,cx=d.x+d.w/2+dx,cy=d.y+d.h/2+dy;
+  return {x:cx-w/2,y:cy-h/2,w,h,s:d.s,lm:d.lm?d.lm.map((v,i)=>i%2?cy+(v-d.y-d.h/2)*sc:cx+(v-d.x-d.w/2)*sc):null,pred:true}});
+ return {D,held:true,from:k}}
+const mdFromRow=d=>({x:d[0],y:d[1],w:d[2],h:d[3],s:d[14],lm:d.slice(4,14)});
+async function ensureYunet(cv){
+ if(!GT.yunetBytes){if(!window.YUNET_B64)await new Promise((res,rej)=>{const sc=document.createElement('script');sc.src='lib/yunet_model.js';sc.onload=res;sc.onerror=()=>rej(new Error('Không tải được model YuNet'));document.head.appendChild(sc)});
+  const bin=atob(window.YUNET_B64);GT.yunetBytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)GT.yunetBytes[i]=bin.charCodeAt(i)}
+ cvWrite(cv,'yunet.onnx',GT.yunetBytes)}
+function gtBoxesNow(){return visible().filter(v=>v.t.type!=='points').map(v=>{const b=bbox(v.pts);return {x:b[0],y:b[1],w:b[2]-b[0],h:b[3]-b[1],id:v.t.id}})}
+function mdMatch(f){ // so box model (score >= ngưỡng, có trễ) với GT đang hiển thị ở frame f
+ const at=mdAt(f),P=MD.prev&&Math.abs(MD.prev.f-f)<=2?MD.prev.boxes:[];
+ const D=(at?at.D:[]).filter(d=>d.s>=MD.thr||(d.s>=MD.thr-0.1&&P.some(b=>iou(b,d)>0.5))),G=f===S.frame?gtBoxesNow():[],used=new Set(),tp=new Set();
+ [...D].sort((a,b)=>b.s-a.s).forEach(d=>{let bj=-1,bo=0.5;G.forEach((g,j)=>{if(used.has(j))return;const o=iou(d,g);if(o>=bo){bo=o;bj=j}});if(bj>=0){used.add(bj);tp.add(d)}});
+ return {D,G,tp,fn:at?G.filter((_,j)=>!used.has(j)):[],held:at?.held,from:at?.from,has:!!at}}
+function drawModel(){
+ if(!MD.show||!MD.dets.size)return;const {D,tp,fn,held,from,has}=mdMatch(S.frame);MD.prev={f:S.frame,boxes:D};if(!has)return;
+ ctx.save();ctx.lineWidth=2;ctx.font='600 11px system-ui';if(held)ctx.globalAlpha=0.55;
+ for(const d of D){const ok=tp.has(d),c=ok?'#22d3ee':'#e64980',[a0,b0]=toS([d.x,d.y]),[a1,b1]=toS([d.x+d.w,d.y+d.h]);
+  ctx.setLineDash([5,4]);ctx.strokeStyle=c;ctx.strokeRect(a0,b0,a1-a0,b1-b0);ctx.setLineDash([]);
+  const tx=(ok?'':'thừa · ')+d.s.toFixed(2)+(held?(d.pred?` · ước lượng từ f${from}`:` · f${from}`):''),tw=ctx.measureText(tx).width+6;ctx.fillStyle=c;ctx.fillRect(a1-tw,b1,tw,15);ctx.fillStyle='#111';ctx.fillText(tx,a1-tw+3,b1+11);
+  if(d.lm&&isFinite(d.lm[0])&&view.s*d.h>28){ctx.fillStyle=c;for(let k=0;k<5;k++){const q=toS([d.lm[2*k],d.lm[2*k+1]]);ctx.beginPath();ctx.arc(q[0],q[1],2,0,7);ctx.fill()}}}
+ if(held){ctx.restore();return} // box giữ lại: không kết luận "model sót"
+ for(const g of fn){const [a0,b0]=toS([g.x,g.y+g.h]),tx='model sót',tw=ctx.measureText(tx).width+6;ctx.fillStyle='#fcc419';ctx.fillRect(a0,b0,tw,15);ctx.fillStyle='#111';ctx.fillText(tx,a0+3,b0+11)}
+ ctx.restore()}
+/* Detect chạy trong Web Worker (lib/md_worker.js) để video không giật; nếu không tạo được Worker
+   (ví dụ mở index.html trực tiếp từ file://) thì chạy trên luồng chính như cũ. */
+const MDW={w:null,failed:false,seq:0,pending:new Map()};
+function mdWorker(){
+ if(MDW.failed)return null;if(MDW.w)return MDW.w;
+ try{const w=new Worker('lib/md_worker.js');
+  w.onmessage=e=>{const p=MDW.pending.get(e.data.id);if(!p)return;MDW.pending.delete(e.data.id);clearTimeout(p.to);e.data.error?p.rej(new Error(e.data.error)):p.res(e.data.rows)};
+  w.onerror=e=>{e.preventDefault?.();MDW.failed=true;for(const p of MDW.pending.values()){clearTimeout(p.to);p.rej(new Error('worker'))}MDW.pending.clear();try{w.terminate()}catch(_){};MDW.w=null};
+  MDW.w=w;return w}catch(e){MDW.failed=true;return null}}
+function workerDetect(img,k){const w=mdWorker();if(!w)return Promise.reject(new Error('worker'));const id=++MDW.seq;
+ return new Promise((res,rej)=>{const to=setTimeout(()=>{MDW.pending.delete(id);rej(new Error('worker'))},120000);MDW.pending.set(id,{res,rej,to});w.postMessage({id,w:img.width,h:img.height,buf:img.data.buffer,k},[img.data.buffer])})}
+async function mainThreadDetect(img,k){
+ await loadCV();const cv=window.cv;if(!MD.det){await ensureYunet(cv);MD.det=new cv.FaceDetectorYN('yunet.onnx','',new cv.Size(320,320),0.3,0.3,5000)}
+ const rgba=cv.matFromImageData(img),bgr=new cv.Mat();cv.cvtColor(rgba,bgr,cv.COLOR_RGBA2BGR);rgba.delete();
+ MD.det.setInputSize(new cv.Size(img.width,img.height));const out=new cv.Mat();MD.det.detect(bgr,out);const R=[];
+ for(let i=0;i<out.rows;i++){const r=Array.from(out.data32F.slice(i*15,i*15+15));for(let j=0;j<14;j++)r[j]/=k;R.push(r)}out.delete();bgr.delete();return R}
+async function detectFrame(f){
+ if(MD.busy||!src)return;MD.busy=true;const gen=MD.gen;if(!playing)$('#mdInfo').textContent='Đang chạy YuNet…';
+ try{ // khi play: thu nhỏ còn cạnh dài 640 để kịp nhịp; khi dừng: dùng "Cạnh dài input" (mặc định 1280)
+  const L=playing?640:+($('#gtLong')?.value||1280),k=Math.min(1,L/Math.max(S.w,S.h)),w=Math.max(8,Math.round(S.w*k)),h=Math.max(8,Math.round(S.h*k));
+  const c=mkCanvas(w,h),g=c.getContext('2d',{willReadFrequently:true});g.drawImage(src.image,0,0,w,h);const grab=()=>g.getImageData(0,0,w,h);
+  let rows;try{rows=await workerDetect(grab(),k)}catch(e){if(!/worker/.test(e.message))throw e;rows=await mainThreadDetect(grab(),k)}
+  if(gen!==MD.gen&&MD.full)return; // vừa nạp file kết quả trong lúc chờ
+  if(MD.full||!MD.src.startsWith('YuNet')){mdReset(false,1);MD.src='YuNet (trong trình duyệt)'}mdSet(f,rows.map(mdFromRow));MD.show=true;$('#mdShow').checked=true}
+ catch(e){toast('Không chạy được YuNet: '+(e.message||e),4000);MD.live=false;$('#mdLive').checked=false}
+ finally{MD.busy=false;if(!playing){updModelSide();render()}else if(MD.live&&src?.kind!=='video')setTimeout(maybeDetectOld,0)}}
+
+/* ---------- TÍNH TRƯỚC (lookahead): video ẩn thứ hai đi trước đầu phát, detect các frame sắp tới ----------
+   Khi video phát tới frame n thì kết quả của n thường đã có sẵn -> box đúng frame, không trễ. */
+const LA={v:null,url:null,running:false,ahead:0,tc:0,step:1}; // tc: thời gian trung bình để detect 1 frame (ms), step: bước khi không theo kịp
+function laVideo(){if(src?.kind!=='video')return null;const url=src.v.currentSrc||src.v.src;if(LA.v&&LA.url===url)return LA.v;
+ const v=document.createElement('video');v.muted=true;v.playsInline=true;v.preload='auto';v.src=url;LA.v=v;LA.url=url;return v}
+function laSeek(v,f){return new Promise(res=>{const t=Math.min((f+.5)/S.fps,Math.max(0,(v.duration||1e9)-0.001));let done=false;const fin=()=>{if(done)return;done=true;v.removeEventListener('seeked',fin);res()};
+ if(Math.abs(v.currentTime-t)<1e-4&&v.readyState>=2)return fin();v.addEventListener('seeked',fin);v.currentTime=t;setTimeout(fin,3000)})}
+function laNext(){ // chọn frame cần tính tiếp theo
+ const cur=S.frame,win=Math.round(10*S.fps),end=Math.min(S.n,cur+win);
+ if(!playing){if(!MD.dets.has(cur))return cur;for(let f=cur+1;f<end;f++)if(!MD.dets.has(f))return f;return null} // dừng: lấp liên tục phía trước
+ const tf=1000/S.fps,tc=Math.max(LA.tc,1);let u=cur;while(u<end&&MD.dets.has(u))u++;if(u>=end)return null;
+ // (1) bộ đệm liên tục còn đủ dài để tính thêm 1 frame trước khi đầu phát tới -> nối dài bộ đệm
+ if((u-cur)*tf>1.5*tc)return u;
+ // (2) không theo kịp: nhảy cách quãng tới frame mà kết quả kịp có trước khi đầu phát tới
+ const step=Math.max(1,Math.ceil(tc/tf));LA.step=step;const lead=Math.ceil(1.3*tc/tf)+1;
+ for(let f=cur+lead;f<end;f+=step)if(!MD.dets.has(f))return f;return null}
+async function laLoop(){
+ if(LA.running)return;LA.running=true;
+ try{while(MD.live&&src){
+  const v=laVideo();if(!v){maybeDetectOld();break}
+  if(v.readyState<2){await new Promise(r=>{v.addEventListener('loadeddata',r,{once:true});setTimeout(r,3000)});continue}
+  const f=laNext();if(f===null){await new Promise(r=>setTimeout(r,60));continue}const gen=MD.gen;
+  const t0=performance.now();await laSeek(v,f);if(!MD.live)break;
+  // đang phát: thu nhỏ còn cạnh dài 640 để tính nhanh hơn; đang dừng: dùng "Cạnh dài input" (mặc định 1280)
+  const L=playing?Math.min(640,+($('#gtLong')?.value||1280)):+($('#gtLong')?.value||1280),k=Math.min(1,L/Math.max(S.w,S.h)),w=Math.max(8,Math.round(S.w*k)),h=Math.max(8,Math.round(S.h*k));
+  const c=LA.c||(LA.c=mkCanvas(w,h));c.width=w;c.height=h;const g=c.getContext('2d',{willReadFrequently:true});g.drawImage(v,0,0,w,h);const grab=()=>g.getImageData(0,0,w,h);
+  let rows;try{rows=await workerDetect(grab(),k)}catch(e){if(!/worker/.test(e.message))throw e;rows=await mainThreadDetect(grab(),k)}
+  if(!MD.live||gen!==MD.gen&&MD.full)break; // đã tắt Tự chạy hoặc vừa nạp file kết quả: bỏ kết quả này
+  if(MD.full||!MD.src.startsWith('YuNet')){mdReset(false,1);MD.src='YuNet (tính trước)'}mdSet(f,rows.map(mdFromRow));MD.show=true;$('#mdShow').checked=true;
+  const dt=performance.now()-t0;LA.tc=LA.tc?0.8*LA.tc+0.2*dt:dt;
+  LA.ahead=(()=>{let n=S.frame;while(n<S.n&&MD.dets.has(n))n++;return n-S.frame})();
+  if(!playing&&f===S.frame){render();updModelSide()}
+  if(f%5===0)drawTimeline();
+  await new Promise(r=>setTimeout(r,0))}}
+ catch(e){toast('Không chạy được YuNet: '+(e.message||e),4000);MD.live=false;$('#mdLive').checked=false}
+ finally{LA.running=false;drawTimeline();updModelSide()}}
+function drawMDMarks(X,h){if(!MD.dets.size||MD.full)return;tctx.fillStyle='rgba(34,211,238,.75)';let last=-9;for(const f of MD.keys){const x=Math.round(X(f+.5));if(x===last)continue;last=x;tctx.fillRect(x,0,1,3)}}
+function maybeDetectOld(){if(MD.live&&!MD.busy&&!seekBusy&&src&&!MD.dets.has(S.frame))detectFrame(S.frame)}
+function maybeDetect(){if(!MD.live||!src)return;if(src.kind==='video')laLoop();else maybeDetectOld()}
+function nms(L,thr=0.3){const out=[];[...L].sort((a,b)=>b.s-a.s).forEach(d=>{if(out.every(o=>iou(o,d)<thr))out.push(d)});return out}
+function loadModelFile(txt,name){
+ if(looksJsonl(txt))return jsonlDialog(txt,'model',false,name);
+ mdReset(true,1);const m=new Map();let n=0;const t=txt.trimStart();
+ if(t.startsWith('<')){const doc=new DOMParser().parseFromString(t,'text/xml'),v=doc.querySelector('Video'),off=+(v?.getAttribute('start_frame')||1);
+  doc.querySelectorAll('Frame').forEach(e=>{const f=+e.getAttribute('frame_no')-off;if(!m.has(f))m.set(f,[]);m.get(f).push({x:+e.getAttribute('x'),y:+e.getAttribute('y'),w:+e.getAttribute('width'),h:+e.getAttribute('height'),s:1});n++})}
+ else for(const line of t.split(/\r?\n/)){const v=line.split(/[,\s]+/).filter(Boolean).map(Number);if(v.length<6||!v.slice(0,6).every(isFinite))continue;
+  const f=Math.round(v[0])-1,d={x:v[2],y:v[3],w:v[4],h:v[5],s:v.length>6&&isFinite(v[6])&&v[6]>=0&&v[6]<=1?v[6]:1,lm:v.length>=17?v.slice(7,17):null};if(!m.has(f))m.set(f,[]);m.get(f).push(d);n++}
+ let before=0,after=0;for(const [f,L] of m){before+=L.length;const k=nms(L);m.set(f,k);after+=k.length}
+ for(const [f,L] of m)mdSet(f,L);MD.src=name;MD.show=true;$('#mdShow').checked=true;updModelSide();render();
+ toast(`Đã nạp ${after} box model ở ${m.size} frame`+(before>after?` (gộp ${before-after} box trùng bằng NMS)`:''),4000)}
+
+/* ---------- ĐÁNH GIÁ MODEL SO VỚI GT (cả video) ----------
+   Cùng cách tính với eval_face_postproc.py: mỗi frame ghép box model (score giảm dần) với box GT có IoU lớn nhất >= ngưỡng,
+   mỗi box GT chỉ ghép 1 lần. AP tính trên mọi box (không lọc score). Số frame trong công cụ đếm từ 0. */
+const EV_SIZES=[[0,10,'<10 px'],[10,24,'10–24 px'],[24,64,'24–64 px'],[64,1e9,'≥64 px']];
+const EV={res:null,segs:[],cur:-1,opt:null};
+function evClear(){EV.res=null;EV.segs=[];EV.cur=-1;const el=$('#mdEval');if(el)el.hidden=true;try{drawTimeline()}catch(_){}}
+function evMatch(D,G,thr){const used=new Set(),tp=new Array(D.length).fill(false),io=new Array(D.length).fill(0),gm=new Array(G.length).fill(-1);
+ D.map((_,i)=>i).sort((a,b)=>D[b].s-D[a].s).forEach(i=>{let bj=-1,bo=thr;G.forEach((g,j)=>{if(used.has(j))return;const o=iou(D[i],g);if(o>=bo){bo=o;bj=j}});if(bj>=0){used.add(bj);tp[i]=true;io[i]=bo;gm[bj]=i}});
+ return {tp,io,gm}}
+function evSize(h){for(const [lo,hi,n] of EV_SIZES)if(h>=lo&&h<hi)return n;return EV_SIZES.at(-1)[2]}
+function evalModel(opt){
+ const Dg=gtData(opt.label),GF=new Map();for(const r of Dg.rows){if(!GF.has(r.f))GF.set(r.f,[]);GF.get(r.f).push(r)}
+ const fs=new Set(MD.keys);if(MD.full)for(const f of GF.keys())fs.add(f);
+ const frames=[...fs].filter(f=>f>=0&&f<S.n).sort((a,b)=>a-b);
+ const TH=[0.3,0.4,0.5,0.6,0.7,0.8,0.9],sw=TH.map(t=>({t,TP:0,FP:0,FN:0}));
+ let TP=0,FP=0,FN=0,nG=0,perfect=0,withAny=0;const scored=[],ious=[],bt={},bh={},per=[],ids=new Map(),skipped=MD.full?0:[...GF.keys()].filter(f=>!fs.has(f)).length;
+ for(const f of frames){const G=GF.get(f)||[],Dall=MD.dets.get(f)||[];nG+=G.length;
+  const a=evMatch(Dall,G,opt.iou);Dall.forEach((d,i)=>scored.push([d.s,a.tp[i]]));
+  const D=Dall.filter(d=>d.s>=opt.thr),m=evMatch(D,G,opt.iou),tp=m.tp.filter(Boolean).length,fp=D.length-tp,fn=G.length-tp;
+  TP+=tp;FP+=fp;FN+=fn;m.tp.forEach((t,i)=>{if(t)ious.push(m.io[i])});
+  if(G.length||D.length){withAny++;if(!fp&&!fn)perfect++}
+  G.forEach((g,j)=>{const b=evSize(g.h);bt[b]=(bt[b]||0)+1;const hit=m.gm[j]>=0;if(hit)bh[b]=(bh[b]||0)+1;
+   let s=ids.get(g.id);if(!s){s={id:g.id,n:0,hit:0,run:0,last:-9,best:0,bestAt:-1,first:f,lastF:f};ids.set(g.id,s)}s.n++;s.lastF=f;
+   if(hit){s.hit++;s.run=0}else{s.run=s.last===f-1?s.run+1:1;s.last=f;if(s.run>s.best){s.best=s.run;s.bestAt=f-s.run+1}}});
+  for(const q of sw){const Dt=Dall.filter(d=>d.s>=q.t),mt=evMatch(Dt,G,opt.iou),k=mt.tp.filter(Boolean).length;q.TP+=k;q.FP+=Dt.length-k;q.FN+=G.length-k}
+  if(fp||fn)per.push({f,g:G.length,d:D.length,tp,fp,fn,fnId:G.filter((_,j)=>m.gm[j]<0).map(g=>g.id)})}
+ // AP (nội suy kiểu VOC, giống script)
+ scored.sort((x,y)=>y[0]-x[0]);let ctp=0,cfp=0;const rec=[],prec=[];for(const [,t] of scored){t?ctp++:cfp++;rec.push(ctp/Math.max(nG,1));prec.push(ctp/Math.max(ctp+cfp,1))}
+ const mr=[0,...rec,1],mp=[0,...prec,0];for(let i=mp.length-2;i>=0;i--)mp[i]=Math.max(mp[i],mp[i+1]);let ap=0;for(let i=1;i<mr.length;i++)if(mr[i]!==mr[i-1])ap+=(mr[i]-mr[i-1])*mp[i];
+ // gộp frame lỗi liên tiếp thành đoạn (cho phép hở 1 frame)
+ const segs=[];for(const p of per){const L=segs.at(-1);if(L&&p.f-L.end<=2){L.end=p.f;L.fp+=p.fp;L.fn+=p.fn;L.n++;p.fnId.forEach(i=>L.ids.add(i))}else segs.push({start:p.f,end:p.f,fp:p.fp,fn:p.fn,n:1,ids:new Set(p.fnId)})}
+ const P=TP/Math.max(TP+FP,1),R=TP/Math.max(TP+FN,1);
+ return {opt,when:new Date().toLocaleString(),src:MD.src,full:MD.full,frames:frames.length,skipped,nG,TP,FP,FN,P,R,F1:2*P*R/Math.max(P+R,1e-9),AP:ap,mIoU:ious.length?ious.reduce((a,b)=>a+b,0)/ious.length:0,
+  perfect,withAny,bySize:EV_SIZES.map(([,,n])=>({n,tot:bt[n]||0,R:(bh[n]||0)/Math.max(bt[n]||0,1)})).filter(x=>x.tot),sweep:sw.map(q=>{const p=q.TP/Math.max(q.TP+q.FP,1),r=q.TP/Math.max(q.TP+q.FN,1);return {...q,P:p,R:r,F1:2*p*r/Math.max(p+r,1e-9)}}),
+  ids:[...ids.values()].sort((a,b)=>a.hit/a.n-b.hit/b.n),per,segs}}
+function renderEval(r){
+ const f3=x=>x.toFixed(3),kp=(v,l)=>`<div><b>${v}</b><span>${l}</span></div>`;
+ const scope=r.full?`${r.frames} frame (file kết quả, frame không có box = model không thấy mặt)`:`${r.frames} frame model đã chạy`+(r.skipped?` · bỏ qua ${r.skipped} frame có GT nhưng model chưa chạy`:'');
+ const best=r.sweep.reduce((a,b)=>b.F1>a.F1?b:a);
+ let h=`<div class="mut">Nguồn: <b>${esc(r.src)}</b> · ${scope} · score ≥ ${r.opt.thr} · IoU ≥ ${r.opt.iou} · tính lúc ${esc(r.when)}</div>
+ <div class="evk">${kp(P1(r.P),'Precision')}${kp(P1(r.R),'Recall')}${kp(f3(r.F1),'F1')}${kp(f3(r.AP),'AP (mọi score)')}${kp(f3(r.mIoU),'mIoU box đúng')}${kp(r.TP,'TP')}${kp(r.FP,'FP · box thừa')}${kp(r.FN,'FN · mặt sót')}${kp(P1(r.perfect/Math.max(r.withAny,1)),`frame đúng hoàn toàn (${r.perfect}/${r.withAny})`)}</div>`;
+ h+=`<div class="gtbox">Recall ${P1(r.R)} nghĩa là cứ 100 mặt trong GT thì model thấy ${(r.R*100).toFixed(0)}. ${r.FN?`Còn ${r.FN} lần sót mặt và ${r.FP} box thừa, nằm trong ${r.segs.length} đoạn lỗi (danh sách bên dưới, bấm để nhảy tới).`:'Không sót mặt nào.'} Ngưỡng score cho F1 cao nhất: <b>${best.t}</b> (F1 ${f3(best.F1)}).</div>`;
+ h+=`<h4>Recall theo cỡ mặt (chiều cao box GT)</h4>`+tbl(r.bySize,[['Cỡ',x=>x.n],['Số box GT',x=>x.tot],['Recall',x=>'<b>'+P1(x.R)+'</b>']]);
+ h+=`<h4>Theo ngưỡng score</h4>`+tbl(r.sweep,[['Score ≥',x=>x.t===r.opt.thr?'<b>'+x.t+'</b>':x.t],['P',x=>P1(x.P)],['R',x=>P1(x.R)],['F1',x=>f3(x.F1)],['FP',x=>x.FP],['FN',x=>x.FN]]);
+ h+=`<h4>Theo từng ID trong GT (ID khó nhất trước)</h4>`+tbl(r.ids,[['ID',x=>'#'+x.id],['Frame có mặt',x=>x.n],['Recall',x=>'<b>'+P1(x.hit/x.n)+'</b>'],['Sót',x=>x.n-x.hit],['Sót liền dài nhất',x=>x.best?`<a href="#" data-f="${x.bestAt}">${x.best} frame từ f${x.bestAt}</a>`:'0']]);
+ h+=`<h4>Đoạn lỗi (${r.segs.length})</h4>`+tbl(r.segs.map((s,i)=>({...s,i})),[['#',x=>x.i+1],['Frame',x=>x.start===x.end?'f'+x.start:`f${x.start}–f${x.end}`],['Frame lỗi',x=>x.n],['Mặt sót',x=>x.fn],['Box thừa',x=>x.fp],['ID bị sót',x=>[...x.ids].map(i=>'#'+i).join(' ')||'–']]).replace(/<tr><td>(\d+)<\/td>/g,(m,n)=>`<tr class="gti" data-seg="${n-1}"><td>${n}</td>`);
+ return h}
+function wireEval(){const o=$('#evOut');if(!o)return;o.querySelectorAll('[data-seg]').forEach(tr=>tr.onclick=()=>{closeModal();evGoto(+tr.dataset.seg)});
+ o.querySelectorAll('a[data-f]').forEach(a=>a.onclick=e=>{e.preventDefault();closeModal();goFrame(+a.dataset.f)})}
+function showEval(){
+ if(!src)return toast('Hãy mở video trước');if(!MD.dets.size)return toast('Chưa có box model: nhập file kết quả (Nhập kết quả…) hoặc chạy YuNet trước');if(playing)togglePlay();
+ const o=EV.opt||{label:(S.labels.find(l=>/face|mặt/i.test(l.name))||{}).id||0,thr:MD.thr,iou:0.5};
+ const lopts=S.labels.map(l=>`<option value="${l.id}"${l.id===o.label?' selected':''}>${esc(l.name)}</option>`).join('');
+ openModal('Đánh giá model so với GT',`<div class="gtcfg"><div class="mdrow" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+  <label>Nhãn GT <select class="btn" id="evLab"><option value="0">Tất cả box</option>${lopts}</select></label>
+  <label>Score ≥ <input class="num" id="evThr" type="number" step="0.05" min="0" max="1" value="${o.thr}"></label>
+  <label>IoU ≥ <input class="num" id="evIou" type="number" step="0.05" min="0.1" max="0.95" value="${o.iou}"></label>
+  <button class="btn primary" id="evRun">Tính</button><button class="btn" id="evCsv" ${EV.res?'':'disabled'}>Tải CSV</button></div>
+  <div class="note">${MD.full?'Đang dùng file kết quả: frame không có box nào được coi là model không thấy mặt.':'Box model đang là kết quả YuNet chạy trong trình duyệt: chỉ tính trên các frame model đã chạy (vạch xanh trên timeline). Muốn đo cả video, chạy <code>eval_face_postproc.py detect</code> rồi Nhập kết quả….'} Cách ghép box giống <code>eval_face_postproc.py</code> (dòng baseline), số frame đếm từ 0.</div></div>
+  <div id="evOut">${EV.res?renderEval(EV.res):''}</div>`);
+ $('#modal').classList.add('wide');wireEval();
+ $('#evRun').onclick=()=>{const opt={label:+$('#evLab').value,thr:+$('#evThr').value,iou:+$('#evIou').value};EV.opt=opt;
+  const D=gtData(opt.label);if(!D.rows.length)return toast('Không có box GT nào với nhãn này');
+  $('#evOut').innerHTML='<div class="mut">Đang tính…</div>';setTimeout(()=>{EV.res=evalModel(opt);EV.segs=EV.res.segs;EV.cur=-1;$('#evOut').innerHTML=renderEval(EV.res);wireEval();$('#evCsv').disabled=false;renderEvalSide();drawTimeline()},20)};
+ $('#evCsv').onclick=exportEval}
+function exportEval(){const r=EV.res;if(!r)return;
+ const head=`# nguon=${r.src}; score>=${r.opt.thr}; iou>=${r.opt.iou}; P=${r.P.toFixed(4)}; R=${r.R.toFixed(4)}; F1=${r.F1.toFixed(4)}; AP=${r.AP.toFixed(4)}; mIoU=${r.mIoU.toFixed(4)}; TP=${r.TP}; FP=${r.FP}; FN=${r.FN}\n`;
+ const rows=['frame,frame_mot,n_gt,n_det,tp,fp,fn,missed_ids',...r.per.map(p=>[p.f,p.f+1,p.g,p.d,p.tp,p.fp,p.fn,p.fnId.join(' ')].join(','))].join('\n');
+ saveFile('﻿'+head+rows,(S.name||'video').replace(/\.[^.]+$/,'')+'_model_eval.csv')}
+function evGoto(i){if(!EV.segs.length)return;i=clamp(i,0,EV.segs.length-1);EV.cur=i;const s=EV.segs[i];MD.show=true;$('#mdShow').checked=true;goFrame(s.start);renderEvalSide()}
+function renderEvalSide(){const el=$('#mdEval');if(!el)return;const r=EV.res;if(!r){el.hidden=true;return}el.hidden=false;
+ el.querySelector('.gtnav span').textContent=`${EV.cur>=0?EV.cur+1:'–'} / ${EV.segs.length}`;const s=EV.segs[EV.cur];
+ el.querySelector('.gtdesc').innerHTML=`P <b>${P1(r.P)}</b> · R <b>${P1(r.R)}</b> · F1 <b>${r.F1.toFixed(3)}</b> · FP ${r.FP} · FN ${r.FN}<br>`+(s?`<b>${s.start===s.end?'f'+s.start:`f${s.start}–f${s.end}`}</b> · ${s.fn} mặt sót${s.ids.size?' ('+[...s.ids].map(i=>'#'+i).join(' ')+')':''} · ${s.fp} box thừa`:`<span class="mut">${EV.segs.length?'Bấm ▶ hoặc phím . để đi tới đoạn lỗi đầu tiên.':'Không có frame lỗi.'}</span>`)}
+function drawEVMarks(X,h){if(!EV.res)return;tctx.fillStyle='#e64980';for(const p of EV.res.per){const x0=X(p.f),w=Math.max(1,X(p.f+1)-x0);tctx.fillRect(x0,h-12,w,5)}}
+
+/* ---------- JSONL: mỗi dòng một frame ----------
+   {"sample_id":"<video>/frame-000011","object":[{"track_id":"1","bbox":[a,b,c,d],"score":0.9?,"label":"face"?}]}
+   Dùng cho cả GT (nút Nhập) và kết quả model (Nhập kết quả…). Chấp nhận dòng JSON hơi lỗi (thiếu dấu ") bằng cách đọc theo mẫu. */
+function looksJsonl(txt){const t=(txt||'').trimStart();if(t[0]!=='{')return false;const L=t.split(/\r?\n/).filter(x=>x.trim());
+ if(/"?sample_id"?\s*:/.test(L[0])||/"?bbox"?\s*:/.test(L[0]))return true;if(L.length<2)return false;try{JSON.parse(t);return false}catch(e){return /^\s*\{/.test(L[1])}}
+function parseJsonl(txt){
+ const vids=new Map();let lines=0,loose=0,bad=0,nScore=0,nBox=0;const numIn=s=>{const m=String(s).match(/(\d+)(?!.*\d)/);return m?+m[1]:NaN};
+ const num=v=>v===undefined||v===null||v===''?NaN:+v;
+ for(const raw of txt.split(/\r?\n/)){const line=raw.trim();if(!line)continue;lines++;let sid='',fr=NaN,objs=[];
+  try{const o=JSON.parse(line);sid=String(o.sample_id??o.sampleId??o.image_id??o.image??o.file??o.file_name??'');fr=num(o.frame??o.frame_id??o.frame_idx??o.frame_no);
+   let A=o.object??o.objects??o.annotations??o.detections??o.boxes??o.faces??[];if(!Array.isArray(A))A=[A];
+   objs=A.map(x=>({id:x.track_id??x.trackId??x.id??x.obj_id,b:x.bbox??x.box??x.bbox_xywh??x.xywh??x.xyxy,s:num(x.score??x.conf??x.confidence??x.prob),label:x.label??x.category??x.class??x.name}))}
+  catch(e){loose++;const m=line.match(/"?sample_id"?\s*:\s*"([^"]*)"/);sid=m?m[1]:'';const fm=line.match(/"?frame(?:_id|_idx|_no)?"?\s*:\s*"?(\d+)/);if(fm)fr=+fm[1];
+   for(const c of line.match(/\{[^{}]*\}/g)||[]){const bm=c.match(/"?(?:bbox|box)"?\s*:\s*\[([^\]]*)\]/);if(!bm)continue;const im=c.match(/"?(?:track_id|id)"?\s*:\s*"?(-?[\w.]+)/),sm=c.match(/"?(?:score|conf|confidence)"?\s*:\s*"?([\d.eE+-]+)/),lm=c.match(/"?(?:label|category|class)"?\s*:\s*"([^"]*)"/);
+    objs.push({id:im?im[1]:undefined,b:bm[1].split(',').map(Number),s:sm?+sm[1]:NaN,label:lm?lm[1]:undefined})}}
+  const k=sid.lastIndexOf('/'),vid=k>=0?sid.slice(0,k):'',fid=k>=0?sid.slice(k+1):sid;if(!isFinite(fr))fr=numIn(fid);
+  if(!isFinite(fr)){bad++;continue}if(!vids.has(vid))vids.set(vid,[]);const V=vids.get(vid);
+  for(const o of objs){const b=(Array.isArray(o.b)?o.b:[]).map(Number);if(b.length<4||!b.slice(0,4).every(isFinite)){bad++;continue}
+   if(isFinite(o.s))nScore++;nBox++;V.push({fr,id:o.id===undefined?null:String(o.id),b:b.slice(0,4),s:isFinite(o.s)?o.s:1,label:o.label==null?null:String(o.label)})}
+  if(!objs.length)V.push({fr,empty:true})} // frame không có mặt: vẫn ghi nhận là đã có kết quả
+ return {vids,lines,loose,bad,nScore,nBox}}
+const JL_FMT={xywh:'[x, y, w, h] – góc trên trái + rộng/cao',xyxy:'[x1, y1, x2, y2] – hai góc',cxcywh:'[cx, cy, w, h] – tâm + rộng/cao'};
+function jlBox(b,fmt,norm){let [a,c,d,e]=b;if(norm){a*=S.w;c*=S.h;d*=S.w;e*=S.h} // vị trí 1,3 theo chiều ngang; 2,4 theo chiều dọc
+ if(fmt==='xyxy')return {x:a,y:c,w:d-a,h:e-c};if(fmt==='cxcywh')return {x:a-d/2,y:c-e/2,w:d,h:e};return {x:a,y:c,w:d,h:e}}
+function jlGuess(R,dest){ // đoán định dạng bbox + frame đầu (0/1) bằng cách so với box đã có (GT khi nhập model, box model khi nhập GT)
+ const all=R.filter(r=>!r.empty),vals=all.flatMap(r=>r.b),norm=vals.length>0&&vals.every(v=>v>=-0.01&&v<=1.5);
+ const minF=Math.min(...R.map(r=>r.fr)),ref=new Map();
+ if(dest==='model'){for(const r of gtData(0).rows){if(!ref.has(r.f))ref.set(r.f,[]);ref.get(r.f).push(r)}}
+ else for(const [f,L] of MD.dets)ref.set(f,L);
+ if(ref.size&&all.length){const step=Math.max(1,Math.floor(all.length/1500));let best=null;
+  for(const fmt of Object.keys(JL_FMT))for(const off of [0,1]){let n=0,hit=0;for(let i=0;i<all.length;i+=step){const r=all[i],G=ref.get(r.fr-off);n++;if(!G)continue;const b=jlBox(r.b,fmt,norm);if(b.w>0&&b.h>0&&G.some(g=>iou(b,g)>=0.5))hit++}
+   const sc=hit/Math.max(n,1);if(!best||sc>best.sc)best={fmt,off,sc}}
+  if(best.sc>=0.2)return {...best,norm,how:`đoán theo ${dest==='model'?'GT':'box model'} đang mở: ${P1(best.sc)} box khớp (IoU ≥ 0.5)`}}
+ const bad=all.some(r=>r.b[2]<=r.b[0]||r.b[3]<=r.b[1]),W=norm?1:S.w,H=norm?1:S.h,over=all.some(r=>r.b[0]+r.b[2]>W*1.05||r.b[1]+r.b[3]>H*1.05);
+ return {fmt:bad?'xywh':over?'xyxy':'xywh',off:minF<=0?0:1,norm,sc:null,how:bad?'có box với số thứ 3/4 nhỏ hơn số 1/2 nên không thể là [x1,y1,x2,y2]':over?'nếu là [x,y,w,h] thì nhiều box tràn khỏi khung hình':'chưa chắc chắn, hãy kiểm tra box trên video'}}
+function jsonlDialog(txt,dest,replace,fname){
+ if(!src){toast('Hãy mở video trước');return false}
+ const J=parseJsonl(txt);if(!J.vids.size){toast('Không đọc được dòng nào trong JSONL');return false}
+ const stem=(S.name||'').replace(/\.[^.]+$/,''),names=[...J.vids.keys()];
+ let vSel=names.find(n=>n===stem)||names.find(n=>stem&&(n.endsWith('/'+stem)||n.includes(stem)||stem.includes(n.split('/').pop())))||names.reduce((a,b)=>J.vids.get(b).length>J.vids.get(a).length?b:a);
+ const render1=()=>{const R=J.vids.get(vSel),g=jlGuess(R,dest),fr=R.map(r=>r.fr);
+  $('#jlFmt').value=g.fmt;$('#jlOff').value=String(g.off);$('#jlNorm').checked=g.norm;
+  $('#jlInfo').innerHTML=`${R.filter(r=>!r.empty).length} box ở ${new Set(fr).size} frame (số frame trong file ${Math.min(...fr)}–${Math.max(...fr)}; video có ${S.n} frame, đánh số 0–${S.n-1}).<br>Đã chọn sẵn: ${esc(JL_FMT[g.fmt])}, frame đầu = ${g.off}${g.norm?', toạ độ chuẩn hoá 0–1':''} (${esc(g.how)}).`};
+ openModal(dest==='model'?'Nhập kết quả model (JSONL)':'Nhập GT (JSONL)',`<div class="gtcfg">
+  <div class="note">${J.lines} dòng · ${J.nBox} box${J.loose?` · ${J.loose} dòng JSON lỗi cú pháp, đã đọc theo mẫu`:''}${J.bad?` · bỏ ${J.bad} mục không đọc được`:''}${dest==='model'&&!J.nScore?' · <b>không có score</b>: mọi box coi như score 1, AP không có ý nghĩa':''}.</div>
+  ${names.length>1?`<label>Video trong file <select class="btn" id="jlVid">${names.map(n=>`<option${n===vSel?' selected':''}>${esc(n)}</option>`).join('')}</select></label>`:''}
+  <label>Định dạng bbox <select class="btn" id="jlFmt">${Object.entries(JL_FMT).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('')}</select></label>
+  <label>Số frame trong sample_id ứng với frame đầu video là <select class="btn" id="jlOff"><option value="0">0 (frame-000000 = frame đầu)</option><option value="1">1 (frame-000001 = frame đầu)</option></select></label>
+  <label class="chk"><input type="checkbox" id="jlNorm">Toạ độ chuẩn hoá 0–1 (nhân với kích thước video)</label>
+  <div class="gtdesc" id="jlInfo"></div>
+  <div class="row"><button class="btn primary" id="jlGo">${dest==='model'?'Nhập làm box model':'Nhập làm GT'}</button></div>
+  <div class="note">Sau khi nhập, tua vài frame xem box có ôm đúng mặt không. Box lệch một nhịp so với chuyển động = sai "frame đầu"; box méo/lệch hẳn = sai định dạng bbox: nhập lại và đổi lựa chọn.</div></div>`);
+ if($('#jlVid'))$('#jlVid').onchange=e=>{vSel=e.target.value;render1()};render1();
+ $('#jlGo').onclick=()=>{const fmt=$('#jlFmt').value,off=+$('#jlOff').value,norm=$('#jlNorm').checked,R=J.vids.get(vSel);
+  const ok=dest==='model'?jlToModel(R,fmt,off,norm,(fname||'kết quả')+(names.length>1?` [${vSel}]`:''),!J.nScore):jlToGT(R,fmt,off,norm,replace);if(ok)closeModal()};
+ return false}
+function jlToModel(R,fmt,off,norm,name,noScore){
+ mdReset(true,1);const m=new Map();let skip=0;
+ for(const r of R){const f=r.fr-off;if(f<0||f>=S.n){skip++;continue}if(!m.has(f))m.set(f,[]);if(r.empty)continue;const b=jlBox(r.b,fmt,norm);if(!(b.w>0&&b.h>0)){skip++;continue}m.get(f).push({...b,s:r.s,lm:null})}
+ let before=0,after=0;for(const [f,L] of m){before+=L.length;const k=nms(L);m.set(f,k);after+=k.length}
+ for(const [f,L] of m)mdSet(f,L);MD.src=name+(noScore?' (không score)':'');MD.show=true;$('#mdShow').checked=true;updModelSide();render();drawTimeline();
+ toast(`Đã nạp ${after} box model ở ${m.size} frame`+(before>after?` (gộp ${before-after} box trùng)`:'')+(skip?` · bỏ ${skip} box ngoài video/không hợp lệ`:''),4500);return true}
+function jlToGT(R,fmt,off,norm,replace){
+ const labelId=n=>{let l=S.labels.find(x=>x.name===n);if(!l){l={id:S.nextLabel++,name:n,color:PALETTE[S.labels.length%PALETTE.length]};S.labels.push(l)}return l.id};
+ const by=new Map();let skip=0,anon=0;
+ for(const r of R){if(r.empty)continue;const f=r.fr-off;if(f<0||f>=S.n){skip++;continue}const b=jlBox(r.b,fmt,norm);if(!(b.w>0&&b.h>0)){skip++;continue}
+  const key=r.id??('_'+(anon++));if(!by.has(key))by.set(key,{label:r.label,fr:[]});by.get(key).fr.push({f,...b})}
+ if(!by.size){toast('Không có box hợp lệ trong phạm vi video (kiểm tra FPS / frame đầu)',4500);return false}
+ const used=new Set(replace?[]:S.tracks.map(t=>t.id)),out=[];
+ for(const [key,g] of by){const fr=g.fr.sort((a,b)=>a.f-b.f).filter((o,i,a)=>!i||a[i-1].f!==o.f);let id=/^\d+$/.test(key)?+key:0;if(!(id>0)||used.has(id))id=0;
+  if(!id){while(used.has(S.nextId))S.nextId++;id=S.nextId}used.add(id);S.nextId=Math.max(S.nextId,id+1);
+  const t={id,type:'rect',label:labelId(g.label||'face'),kf:{},hidden:false,locked:false};
+  fr.forEach((o,i)=>{const P=[[o.x,o.y],[o.x+o.w,o.y+o.h]];t.kf[o.f]={pts:P,outside:false};const nx=fr[i+1];if((nx&&nx.f>o.f+1)||(!nx&&o.f+1<S.n))t.kf[o.f+1]={pts:clone(P),outside:true}});out.push(t)}
+ pushUndo();S.tracks=replace?out:S.tracks.concat(out);sel=null;renderLabels();changed();
+ toast(`Đã nhập ${out.length} track`+(anon?` (${anon} box không có track_id: mỗi box một track)`:'')+(skip?` · bỏ ${skip} box ngoài video/không hợp lệ`:''),4500);return true}
+function addModelToGT(){
+ if(!MD.dets.has(S.frame))return toast('Frame này chưa chạy model (box đang hiện là box giữ lại): bấm "Chạy frame này" trước');const {D}=mdMatch(S.frame),G=gtBoxesNow();
+ const add=D.filter(d=>!G.some(g=>iou(d,g)>=0.3));if(!add.length)return toast('Mọi box model ở frame này đã có nhãn');
+ pushUndo();const f=S.frame;for(const d of add){const P=[[r2(d.x),r2(d.y)],[r2(d.x+d.w),r2(d.y+d.h)]],t={id:S.nextId++,type:'rect',label:curLabel,kf:{[f]:{pts:P,outside:false}},hidden:false,locked:false};
+  if(f+1<S.n)t.kf[f+1]={pts:clone(P),outside:true};S.tracks.push(t);sel=t.id}
+ changed();toast(`Đã thêm ${add.length} box thành track mới ở frame ${f}. Track chỉ có ở frame này: tua sang frame sau và bấm O để kéo dài.`,5000)}
+function updModelSide(){const el=$('#mdInfo');if(!el)return;if(playing){const t=performance.now();if(t-MD.infoT<300)return;MD.infoT=t}if(!MD.dets.size){el.innerHTML='<span class="mut">Chưa có box model. Bấm "Chạy frame này", bật tự chạy, hoặc nhập file kết quả (MOT có score như res/variant_8.txt, Music Video XML, hoặc JSONL).</span>';return}
+ const m=mdMatch(S.frame),has=m.has;
+ el.innerHTML=`Nguồn: <b>${esc(MD.src)}</b> · ${MD.dets.size} frame có kết quả`+(MD.live&&src?.kind==='video'?` · tính trước <b>${LA.ahead}</b> frame (${(LA.ahead/S.fps).toFixed(1)} s) · ${LA.tc?Math.round(LA.tc)+' ms/frame'+(LA.tc>1000/S.fps?` (chậm hơn video: khi phát chỉ tính khoảng mỗi ${Math.ceil(LA.tc*S.fps/1000)} frame, xen giữa là box ước lượng; dừng một lúc cho nó tính trước sẽ chính xác hơn)`:' (theo kịp video)'):''}`:'')+`<br>`+(has?(m.held?`<span class="mut">Frame này chưa chạy model: đang giữ box của frame ${m.from} (vẽ mờ).</span><br>`:'')+`Frame này: <b>${m.D.length}</b> box (score ≥ ${MD.thr.toFixed(2)}): <span style="color:#22d3ee">${m.tp.size} khớp GT</span> · <span style="color:#e64980">${m.D.length-m.tp.size} thừa</span> · <span style="color:#fcc419">${m.held?'–':m.fn.length} GT model sót</span>`:'<span class="mut">Frame này chưa chạy model.</span>')}
+
+/* ---------- wiring ---------- */
+$('#mdShow').onchange=e=>{MD.show=e.target.checked;render()};$('#mdLive').onchange=e=>{MD.live=e.target.checked;maybeDetect()};
+$('#mdThr').oninput=e=>{MD.thr=+e.target.value;$('#mdThrO').textContent=MD.thr.toFixed(2);updModelSide();render()};
+$('#mdRun').onclick=()=>{if(!src)return toast('Hãy mở video trước');if(MD.full){mdReset(false,1)}detectFrame(S.frame)};
+$('#mdFile').onclick=()=>$('#mdIn').click();$('#mdIn').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(f)loadModelFile(await f.text(),f.name)};
+$('#mdEvalBtn').onclick=showEval;$('#evOpen').onclick=showEval;$('#evPrev').onclick=()=>evGoto(EV.cur-1);$('#evNext').onclick=()=>evGoto(EV.cur+1);
+$('#mdClear').onclick=()=>{mdReset(false,1);MD.src='';updModelSide();render()};$('#mdAdd').onclick=addModelToGT;
+$('#gtBtn').onclick=showGT;$('#gtOpen').onclick=showGT;
+updModelSide();$('#gtPrev').onclick=()=>gotoIssue(Math.max(0,GT.cur-1));$('#gtNext').onclick=()=>gotoIssue(Math.min(GT.issues.length-1,GT.cur+1));
+document.querySelectorAll('.tool[data-tool]').forEach(b=>b.onclick=()=>setTool(b.dataset.tool));
+document.querySelectorAll('.seg button').forEach(b=>b.onclick=()=>{mode=b.dataset.mode;document.querySelectorAll('.seg button').forEach(x=>x.classList.toggle('on',x===b));hint()});
+$('#openBtn').onclick=$('#openBtn2').onclick=()=>$('#fileIn').click();
+$('#demoBtn').onclick=$('#demoBtn2').onclick=openDemo;
+$('#fileIn').onchange=e=>{const f=e.target.files[0];e.target.value='';if(f)openVideo(f)};
+$('#bStart').onclick=()=>goFrame(0);$('#bEnd').onclick=()=>goFrame(S.n-1);$('#bPrev').onclick=()=>goFrame(S.frame-1);$('#bNext').onclick=()=>goFrame(S.frame+1);
+$('#bBack10').onclick=()=>goFrame(S.frame-10);$('#bFwd10').onclick=()=>goFrame(S.frame+10);$('#bPlay').onclick=togglePlay;
+$('#bKey').onclick=toggleKey;$('#bOut').onclick=toggleOutside;$('#bKPrev').onclick=()=>jumpKey(-1);$('#bKNext').onclick=()=>jumpKey(1);
+$('#frameIn').onchange=e=>goFrame(+e.target.value||0);
+$('#fpsIn').onchange=e=>{const v=+e.target.value;if(!src||!(v>0)){e.target.value=S.fps;return}S.fps=v;S.n=Math.max(1,Math.floor(S.duration*v+1e-6));$('#frameIn').max=S.n-1;goFrame(Math.min(S.frame,S.n-1));persist();toast(`FPS = ${v} → ${S.n} frame`)};
+document.querySelectorAll('#boxEd input').forEach(i=>i.onchange=()=>{const g=k=>+$('#boxEd input[data-k="'+k+'"]').value;setBox(g('x'),g('y'),g('w'),g('h'))});
+$('#undoBtn').onclick=undo;$('#redoBtn').onclick=redo;
+$('#fitBtn').onclick=fit;$('#zoomIn').onclick=()=>zoomAt([W/2,H/2],1.25);$('#zoomOut').onclick=()=>zoomAt([W/2,H/2],0.8);
+$('#showTags').onchange=render;$('#curLabelSel').onchange=e=>setCurLabel(+e.target.value,false);
+$('#exportBtn').onclick=showExport;$('#importBtn').onclick=showImport;$('#helpBtn').onclick=showHelp;
+$('#sideBtn').onclick=()=>$('#side').classList.toggle('open');
+$('#addLabelForm').onsubmit=e=>{e.preventDefault();const v=$('#newLabel').value.trim();if(!v)return;if(S.labels.some(l=>l.name===v))return toast('Nhãn đã tồn tại');
+ const l={id:S.nextLabel++,name:v,color:PALETTE[S.labels.length%PALETTE.length]};S.labels.push(l);$('#newLabel').value='';setCurLabel(l.id,false);persist()};
+let dc=0;
+addEventListener('dragenter',e=>{e.preventDefault();dc++;stage.classList.add('drop')});
+addEventListener('dragleave',()=>{if(--dc<=0){dc=0;stage.classList.remove('drop')}});
+addEventListener('dragover',e=>e.preventDefault());
+addEventListener('drop',e=>{e.preventDefault();dc=0;stage.classList.remove('drop');const f=[...e.dataTransfer.files].find(f=>f.type.startsWith('video/')||/\.(mp4|webm|mov|mkv|m4v)$/i.test(f.name));if(f)openVideo(f);else toast('Không có file video')});
+
+renderLabels();renderObjects();updBtns();updFrameUI();
+})();
+</script>
+</body>
+</html>
