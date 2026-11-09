@@ -36,6 +36,7 @@ Mở thẳng `index.html` (double-click) vẫn chạy được, nhưng Web Worke
 | Music Video XML (`<Video><Trajectory obj_id><Frame …/>`) | có | có | có |
 | JSONL (mỗi dòng một frame) | có | có | – |
 | JSON theo frame (`data.frames`) | có | có | – |
+| JSON mảng bản ghi kiểu JSONL (`[{"sample_id":…,"object":[…]}]` hoặc `{"samples":[…]}`) | có | có | – |
 | MOT 1.1 (`frame,id,x,y,w,h,score[,10 landmark]`) | – | có | có |
 | YOLO | – | – | có |
 

@@ -707,6 +707,7 @@ function importData(txt,replace){
    const P=ptsOf(c),t={id:S.nextId++,type:TAG[c.tagName],label:labelId(c.getAttribute('label')),kf:{[f]:{pts:P,outside:false}},hidden:false,locked:false};if(f+1<S.n)t.kf[f+1]={pts:clone(P),outside:true};out.push(t)})});
  }else if(/"?f(?:r)?ames"?\s*:/.test(txt)&&parseFramesJson(txt)){jsonlDialog(parseFramesJson(txt),'gt',replace);return false}
  else if(looksJsonl(txt)){jsonlDialog(txt,'gt',replace);return false}
+ else if(jsonArrayToJsonl(txt)){jsonlDialog({...parseJsonl(jsonArrayToJsonl(txt)),kind:'JSON'},'gt',replace);return false}
  else{let d;try{d=JSON.parse(txt)}catch(e){toast('Nội dung không phải JSON/XML hợp lệ');return false}
   if(d.format!=='mini-cvat-video'){toast('JSON không đúng định dạng Mini CVAT video');return false}
   (d.labels||[]).forEach(l=>labelId(l.name,l.color));
@@ -1166,7 +1167,7 @@ function maybeDetectOld(){if(MD.live&&!MD.busy&&!seekBusy&&src&&!MD.dets.has(S.f
 function maybeDetect(){if(!MD.live||!src)return;if(src.kind==='video')laLoop();else maybeDetectOld()}
 function nms(L,thr=0.3){const out=[];[...L].sort((a,b)=>b.s-a.s).forEach(d=>{if(out.every(o=>iou(o,d)<thr))out.push(d)});return out}
 function loadModelFile(txt,name){
- {const F=parseFramesJson(txt);if(F)return jsonlDialog(F,'model',false,name)}
+ {const F=parseFramesJson(txt);if(F)return jsonlDialog(F,'model',false,name);const A=jsonArrayToJsonl(txt);if(A)return jsonlDialog({...parseJsonl(A),kind:'JSON'},'model',false,name)}
  if(looksJsonl(txt))return jsonlDialog(txt,'model',false,name);
  mdReset(true,1);const m=new Map();let n=0;const t=txt.trimStart();
  if(t.startsWith('<')){const doc=new DOMParser().parseFromString(t,'text/xml'),v=doc.querySelector('Video'),off=+(v?.getAttribute('start_frame')||1);
@@ -1275,6 +1276,10 @@ function parseFramesJson(txt){
 /* ---------- JSONL: mỗi dòng một frame ----------
    {"sample_id":"<video>/frame-000011","object":[{"track_id":"1","bbox":[a,b,c,d],"score":0.9?,"label":"face"?}]}
    Dùng cho cả GT (nút Nhập) và kết quả model (Nhập kết quả…). Chấp nhận dòng JSON hơi lỗi (thiếu dấu ") bằng cách đọc theo mẫu. */
+function jsonArrayToJsonl(txt){ // [{"sample_id":…,"object":[…]}, …] hoặc {"samples"/"data"/"annotations":[…]} -> các dòng JSONL
+ const t=(txt||'').trim();if(t[0]!=='['&&t[0]!=='{')return null;let o;try{o=JSON.parse(t)}catch(e){try{o=JSON.parse(jsonRepair(t))}catch(e2){return null}}
+ const A=Array.isArray(o)?o:[o.samples,o.data,o.annotations,o.items,o.results].find(Array.isArray);
+ if(!A||!A.length||!A.some(x=>x&&typeof x==='object'&&('sample_id' in x||'object' in x||'objects' in x)))return null;return A.map(x=>JSON.stringify(x)).join('\n')}
 function looksJsonl(txt){const t=(txt||'').trimStart();if(t[0]!=='{')return false;const L=t.split(/\r?\n/).filter(x=>x.trim());
  if(/"?sample_id"?\s*:/.test(L[0])||/"?bbox"?\s*:/.test(L[0]))return true;if(L.length<2)return false;try{JSON.parse(t);return false}catch(e){return /^\s*\{/.test(L[1])}}
 function parseJsonl(txt){
@@ -1316,7 +1321,7 @@ function jsonlDialog(txt,dest,replace,fname){
   $('#jlFmt').value=g.fmt;$('#jlOff').value=String(g.off);$('#jlNorm').checked=g.norm;
   $('#jlInfo').innerHTML=`${R.filter(r=>!r.empty).length} box ở ${new Set(fr).size} frame (số frame trong file ${Math.min(...fr)}–${Math.max(...fr)}; video có ${S.n} frame, đánh số 0–${S.n-1}).<br>Đã chọn sẵn: ${esc(JL_FMT[g.fmt])}, frame đầu = ${g.off}${g.norm?', toạ độ chuẩn hoá 0–1':''} (${esc(g.how)}).`};
  openModal((dest==='model'?'Nhập kết quả model':'Nhập GT')+` (${J.kind||'JSONL'})`,`<div class="gtcfg">
-  <div class="note">${J.detector?'Detector: <b>'+esc(J.detector)+'</b> · ':''}${J.kind==='JSON frames'?J.lines+' frame':J.lines+' dòng'} · ${J.nBox} box${J.fixed?' · đã tự sửa lỗi cú pháp JSON':''}${J.loose?` · ${J.loose} dòng JSON lỗi cú pháp, đã đọc theo mẫu`:''}${J.bad?` · bỏ ${J.bad} mục không đọc được`:''}${dest==='model'&&!J.nScore?' · <b>không có score</b>: mọi box coi như score 1, AP không có ý nghĩa':''}.</div>
+  <div class="note">${J.detector?'Detector: <b>'+esc(J.detector)+'</b> · ':''}${J.kind==='JSON frames'?J.lines+' frame':J.lines+(J.kind==='JSON'?' bản ghi':' dòng')} · ${J.nBox} box${J.fixed?' · đã tự sửa lỗi cú pháp JSON':''}${J.loose?` · ${J.loose} dòng JSON lỗi cú pháp, đã đọc theo mẫu`:''}${J.bad?` · bỏ ${J.bad} mục không đọc được`:''}${dest==='model'&&!J.nScore?' · <b>không có score</b>: mọi box coi như score 1, AP không có ý nghĩa':''}.</div>
   ${names.length>1?`<label>Video trong file <select class="btn" id="jlVid">${names.map(n=>`<option${n===vSel?' selected':''}>${esc(n)}</option>`).join('')}</select></label>`:''}
   <label>Định dạng bbox <select class="btn" id="jlFmt">${Object.entries(JL_FMT).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('')}</select></label>
   <label>Số frame trong sample_id ứng với frame đầu video là <select class="btn" id="jlOff"><option value="0">0 (frame-000000 = frame đầu)</option><option value="1">1 (frame-000001 = frame đầu)</option></select></label>
