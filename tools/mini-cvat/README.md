@@ -35,6 +35,7 @@ Mở thẳng `index.html` (double-click) vẫn chạy được, nhưng Web Worke
 | Mini CVAT JSON | có | – | có |
 | Music Video XML (`<Video><Trajectory obj_id><Frame …/>`) | có | có | có |
 | JSONL (mỗi dòng một frame) | có | có | – |
+| JSON theo frame (`data.frames`) | có | có | – |
 | MOT 1.1 (`frame,id,x,y,w,h,score[,10 landmark]`) | – | có | có |
 | YOLO | – | – | có |
 
@@ -49,6 +50,17 @@ Số frame trong công cụ đếm từ 0; file MOT đếm từ 1.
 - Số frame lấy từ số cuối trong `sample_id`; phần trước `/` là tên video. `score` không bắt buộc.
 - Khi nhập, công cụ hỏi định dạng bbox (`[x,y,w,h]`, `[x1,y1,x2,y2]`, `[cx,cy,w,h]`, pixel hay chuẩn hoá 0–1), frame đầu là `frame-000000` hay `frame-000001`, và video nào nếu file có nhiều video. Các lựa chọn được đoán sẵn; nếu đã mở GT, công cụ thử mọi tổ hợp và chọn tổ hợp khớp GT nhiều nhất.
 - Dòng JSON hơi lỗi (thiếu dấu `"`) vẫn được đọc theo mẫu. `object` rỗng = frame không có mặt.
+
+### JSON theo frame (kết quả detector)
+
+```
+{"data":{"detector":{"inputResolution":"original","model":"yunet"},
+         "frames":{"1":[{"bbox":[1,2,3,4],"confidence":0.5,"id":"f1_1","landmarks":[1,2,3,4,5,6,7,8,9,10]}]}}}
+```
+
+- Khoá của `frames` là số frame; `confidence` là score; `landmarks` (5 điểm x,y) được vẽ lên box. Tên model và `inputResolution` hiện ở mục Box model.
+- Cũng nhận `frames` ở ngoài cùng, hoặc `frames` là mảng `[{"frame":1,"faces":[…]}]`.
+- Định dạng bbox và frame đầu được hỏi và đoán sẵn giống JSONL. Lỗi gõ hay gặp (thiếu `"`, `::`, dấu phẩy thừa) được tự sửa.
 
 ## Thử nhanh
 

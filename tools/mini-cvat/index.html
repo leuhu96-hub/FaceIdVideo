@@ -705,7 +705,8 @@ function importData(txt,replace){
    for(const c of ks){t.kf[+c.getAttribute('frame')]={pts:ptsOf(c),outside:c.getAttribute('outside')==='1'}}out.push(t)});
   doc.querySelectorAll('annotations > image').forEach(im=>{const f=+im.getAttribute('id');[...im.children].filter(c=>TAG[c.tagName]).forEach(c=>{
    const P=ptsOf(c),t={id:S.nextId++,type:TAG[c.tagName],label:labelId(c.getAttribute('label')),kf:{[f]:{pts:P,outside:false}},hidden:false,locked:false};if(f+1<S.n)t.kf[f+1]={pts:clone(P),outside:true};out.push(t)})});
- }else if(looksJsonl(txt)){jsonlDialog(txt,'gt',replace);return false}
+ }else if(/"?f(?:r)?ames"?\s*:/.test(txt)&&parseFramesJson(txt)){jsonlDialog(parseFramesJson(txt),'gt',replace);return false}
+ else if(looksJsonl(txt)){jsonlDialog(txt,'gt',replace);return false}
  else{let d;try{d=JSON.parse(txt)}catch(e){toast('Nội dung không phải JSON/XML hợp lệ');return false}
   if(d.format!=='mini-cvat-video'){toast('JSON không đúng định dạng Mini CVAT video');return false}
   (d.labels||[]).forEach(l=>labelId(l.name,l.color));
@@ -1165,6 +1166,7 @@ function maybeDetectOld(){if(MD.live&&!MD.busy&&!seekBusy&&src&&!MD.dets.has(S.f
 function maybeDetect(){if(!MD.live||!src)return;if(src.kind==='video')laLoop();else maybeDetectOld()}
 function nms(L,thr=0.3){const out=[];[...L].sort((a,b)=>b.s-a.s).forEach(d=>{if(out.every(o=>iou(o,d)<thr))out.push(d)});return out}
 function loadModelFile(txt,name){
+ {const F=parseFramesJson(txt);if(F)return jsonlDialog(F,'model',false,name)}
  if(looksJsonl(txt))return jsonlDialog(txt,'model',false,name);
  mdReset(true,1);const m=new Map();let n=0;const t=txt.trimStart();
  if(t.startsWith('<')){const doc=new DOMParser().parseFromString(t,'text/xml'),v=doc.querySelector('Video'),off=+(v?.getAttribute('start_frame')||1);
@@ -1250,6 +1252,26 @@ function renderEvalSide(){const el=$('#mdEval');if(!el)return;const r=EV.res;if(
  el.querySelector('.gtdesc').innerHTML=`P <b>${P1(r.P)}</b> · R <b>${P1(r.R)}</b> · F1 <b>${r.F1.toFixed(3)}</b> · FP ${r.FP} · FN ${r.FN}<br>`+(s?`<b>${s.start===s.end?'f'+s.start:`f${s.start}–f${s.end}`}</b> · ${s.fn} mặt sót${s.ids.size?' ('+[...s.ids].map(i=>'#'+i).join(' ')+')':''} · ${s.fp} box thừa`:`<span class="mut">${EV.segs.length?'Bấm ▶ hoặc phím . để đi tới đoạn lỗi đầu tiên.':'Không có frame lỗi.'}</span>`)}
 function drawEVMarks(X,h){if(!EV.res)return;tctx.fillStyle='#e64980';for(const p of EV.res.per){const x0=X(p.f),w=Math.max(1,X(p.f+1)-x0);tctx.fillRect(x0,h-12,w,5)}}
 
+
+/* ---------- JSON theo frame (kết quả detector) ----------
+   {"data":{"detector":{"inputResolution":"original","model":"…"},
+            "frames":{"1":[{"bbox":[a,b,c,d],"confidence":0.9,"id":"f1_1","landmarks":[10 số]}, …], "2":[…]}}}
+   Cũng nhận "frames" ở ngoài cùng, hoặc "frames" là mảng [{"frame":1,"faces":[…]}]. Định dạng bbox / frame đầu hỏi trong hộp thoại như JSONL. */
+function jsonRepair(t){ // sửa vài lỗi gõ hay gặp: thiếu dấu " mở khoá, '::', dấu phẩy thừa
+ return t.replace(/"(\w+)"?\s*::/g,'"$1":').replace(/([{,]\s*)([A-Za-z_]\w*)"\s*:/g,'$1"$2":').replace(/([{,]\s*)([A-Za-z_]\w*)\s*:/g,'$1"$2":').replace(/,\s*([}\]])/g,'$1')}
+function parseFramesJson(txt){
+ const t=(txt||'').trim();if(t[0]!=='{'||!/"?f(?:r)?ames"?\s*:/.test(t))return null;let o,fixed=false;
+ try{o=JSON.parse(t)}catch(e){try{o=JSON.parse(jsonRepair(t));fixed=true}catch(e2){toast('File JSON lỗi cú pháp: '+e.message,6000);return null}}
+ const d=o.data&&typeof o.data==='object'?o.data:o,fr=d.frames??d.fames??o.frames;if(!fr||typeof fr!=='object')return null;
+ const det=d.detector||o.detector||{},detName=[det.model||det.name,det.inputResolution?'input '+det.inputResolution:''].filter(Boolean).join(', ');
+ const num=v=>v===undefined||v===null||v===''?NaN:+v,rows=[];let nBox=0,nScore=0,bad=0,lines=0;
+ const ent=Array.isArray(fr)?fr.map((x,i)=>[x.frame??x.frame_id??x.frame_no??x.index??i,x.faces??x.objects??x.detections??x.boxes??x.object??[]]):Object.entries(fr);
+ for(const [k,L0] of ent){const f=num(String(k).match(/-?\d+/)?.[0]);lines++;if(!isFinite(f)){bad++;continue}const L=Array.isArray(L0)?L0:[L0];
+  if(!L.length){rows.push({fr:f,empty:true});continue}
+  for(const x of L){const b=(x.bbox??x.box??x.xywh??x.xyxy??[]).map(Number);if(b.length<4||!b.slice(0,4).every(isFinite)){bad++;continue}
+   const s=num(x.confidence??x.score??x.conf??x.prob),lm=x.landmarks??x.landmark??x.kps??x.keypoints;nBox++;if(isFinite(s))nScore++;
+   rows.push({fr:f,id:x.id==null?(x.track_id==null?null:String(x.track_id)):String(x.id),b:b.slice(0,4),s:isFinite(s)?s:1,label:x.label??null,lm:Array.isArray(lm)&&lm.flat().length>=10&&lm.flat().slice(0,10).every(v=>isFinite(+v))?lm.flat().slice(0,10).map(Number):null})}}
+ return {vids:new Map([['',rows]]),lines,loose:0,bad,nScore,nBox,kind:'JSON frames',detector:detName,fixed}}
 /* ---------- JSONL: mỗi dòng một frame ----------
    {"sample_id":"<video>/frame-000011","object":[{"track_id":"1","bbox":[a,b,c,d],"score":0.9?,"label":"face"?}]}
    Dùng cho cả GT (nút Nhập) và kết quả model (Nhập kết quả…). Chấp nhận dòng JSON hơi lỗi (thiếu dấu ") bằng cách đọc theo mẫu. */
@@ -1287,14 +1309,14 @@ function jlGuess(R,dest){ // đoán định dạng bbox + frame đầu (0/1) b�
  return {fmt:bad?'xywh':over?'xyxy':'xywh',off:minF<=0?0:1,norm,sc:null,how:bad?'có box với số thứ 3/4 nhỏ hơn số 1/2 nên không thể là [x1,y1,x2,y2]':over?'nếu là [x,y,w,h] thì nhiều box tràn khỏi khung hình':'chưa chắc chắn, hãy kiểm tra box trên video'}}
 function jsonlDialog(txt,dest,replace,fname){
  if(!src){toast('Hãy mở video trước');return false}
- const J=parseJsonl(txt);if(!J.vids.size){toast('Không đọc được dòng nào trong JSONL');return false}
+ const J=typeof txt==='string'?parseJsonl(txt):txt;if(!J.vids.size){toast('Không đọc được box nào trong file');return false}
  const stem=(S.name||'').replace(/\.[^.]+$/,''),names=[...J.vids.keys()];
  let vSel=names.find(n=>n===stem)||names.find(n=>stem&&(n.endsWith('/'+stem)||n.includes(stem)||stem.includes(n.split('/').pop())))||names.reduce((a,b)=>J.vids.get(b).length>J.vids.get(a).length?b:a);
  const render1=()=>{const R=J.vids.get(vSel),g=jlGuess(R,dest),fr=R.map(r=>r.fr);
   $('#jlFmt').value=g.fmt;$('#jlOff').value=String(g.off);$('#jlNorm').checked=g.norm;
   $('#jlInfo').innerHTML=`${R.filter(r=>!r.empty).length} box ở ${new Set(fr).size} frame (số frame trong file ${Math.min(...fr)}–${Math.max(...fr)}; video có ${S.n} frame, đánh số 0–${S.n-1}).<br>Đã chọn sẵn: ${esc(JL_FMT[g.fmt])}, frame đầu = ${g.off}${g.norm?', toạ độ chuẩn hoá 0–1':''} (${esc(g.how)}).`};
- openModal(dest==='model'?'Nhập kết quả model (JSONL)':'Nhập GT (JSONL)',`<div class="gtcfg">
-  <div class="note">${J.lines} dòng · ${J.nBox} box${J.loose?` · ${J.loose} dòng JSON lỗi cú pháp, đã đọc theo mẫu`:''}${J.bad?` · bỏ ${J.bad} mục không đọc được`:''}${dest==='model'&&!J.nScore?' · <b>không có score</b>: mọi box coi như score 1, AP không có ý nghĩa':''}.</div>
+ openModal((dest==='model'?'Nhập kết quả model':'Nhập GT')+` (${J.kind||'JSONL'})`,`<div class="gtcfg">
+  <div class="note">${J.detector?'Detector: <b>'+esc(J.detector)+'</b> · ':''}${J.kind==='JSON frames'?J.lines+' frame':J.lines+' dòng'} · ${J.nBox} box${J.fixed?' · đã tự sửa lỗi cú pháp JSON':''}${J.loose?` · ${J.loose} dòng JSON lỗi cú pháp, đã đọc theo mẫu`:''}${J.bad?` · bỏ ${J.bad} mục không đọc được`:''}${dest==='model'&&!J.nScore?' · <b>không có score</b>: mọi box coi như score 1, AP không có ý nghĩa':''}.</div>
   ${names.length>1?`<label>Video trong file <select class="btn" id="jlVid">${names.map(n=>`<option${n===vSel?' selected':''}>${esc(n)}</option>`).join('')}</select></label>`:''}
   <label>Định dạng bbox <select class="btn" id="jlFmt">${Object.entries(JL_FMT).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('')}</select></label>
   <label>Số frame trong sample_id ứng với frame đầu video là <select class="btn" id="jlOff"><option value="0">0 (frame-000000 = frame đầu)</option><option value="1">1 (frame-000001 = frame đầu)</option></select></label>
@@ -1304,11 +1326,11 @@ function jsonlDialog(txt,dest,replace,fname){
   <div class="note">Sau khi nhập, tua vài frame xem box có ôm đúng mặt không. Box lệch một nhịp so với chuyển động = sai "frame đầu"; box méo/lệch hẳn = sai định dạng bbox: nhập lại và đổi lựa chọn.</div></div>`);
  if($('#jlVid'))$('#jlVid').onchange=e=>{vSel=e.target.value;render1()};render1();
  $('#jlGo').onclick=()=>{const fmt=$('#jlFmt').value,off=+$('#jlOff').value,norm=$('#jlNorm').checked,R=J.vids.get(vSel);
-  const ok=dest==='model'?jlToModel(R,fmt,off,norm,(fname||'kết quả')+(names.length>1?` [${vSel}]`:''),!J.nScore):jlToGT(R,fmt,off,norm,replace);if(ok)closeModal()};
+  const ok=dest==='model'?jlToModel(R,fmt,off,norm,(fname||'kết quả')+(J.detector?` · ${J.detector}`:'')+(names.length>1?` [${vSel}]`:''),!J.nScore):jlToGT(R,fmt,off,norm,replace);if(ok)closeModal()};
  return false}
 function jlToModel(R,fmt,off,norm,name,noScore){
  mdReset(true,1);const m=new Map();let skip=0;
- for(const r of R){const f=r.fr-off;if(f<0||f>=S.n){skip++;continue}if(!m.has(f))m.set(f,[]);if(r.empty)continue;const b=jlBox(r.b,fmt,norm);if(!(b.w>0&&b.h>0)){skip++;continue}m.get(f).push({...b,s:r.s,lm:null})}
+ for(const r of R){const f=r.fr-off;if(f<0||f>=S.n){skip++;continue}if(!m.has(f))m.set(f,[]);if(r.empty)continue;const b=jlBox(r.b,fmt,norm);if(!(b.w>0&&b.h>0)){skip++;continue}m.get(f).push({...b,s:r.s,lm:r.lm?r.lm.map((v,i)=>norm?v*(i%2?S.h:S.w):v):null})}
  let before=0,after=0;for(const [f,L] of m){before+=L.length;const k=nms(L);m.set(f,k);after+=k.length}
  for(const [f,L] of m)mdSet(f,L);MD.src=name+(noScore?' (không score)':'');MD.show=true;$('#mdShow').checked=true;updModelSide();render();drawTimeline();
  toast(`Đã nạp ${after} box model ở ${m.size} frame`+(before>after?` (gộp ${before-after} box trùng)`:'')+(skip?` · bỏ ${skip} box ngoài video/không hợp lệ`:''),4500);return true}
