@@ -78,6 +78,20 @@ Số frame trong công cụ đếm từ 0; file MOT đếm từ 1.
 
 Kết quả: P, R, F1, AP, mIoU, TP/FP/FN, % frame đúng hoàn toàn, recall theo cỡ mặt, bảng theo ngưỡng score, recall từng ID, danh sách đoạn lỗi (bấm để nhảy tới; phím `,` / `.`). **Tải CSV** ghi từng frame lỗi. Cách ghép box giống dòng `0. baseline` của `eval_face_postproc.py eval`.
 
+## Đánh giá cả folder
+
+Nút **Đánh giá folder** trên thanh công cụ chấm nhiều video một lần.
+
+1. Chọn **Folder video…**, **Folder GT…**, và **Folder kết quả model…** (không bắt buộc).
+2. Công cụ ghép theo tên file, không phân biệt hoa thường: `videos/a.mp4` ↔ `gt/a.txt` hoặc `gt/a.json` ↔ `results/a.json`. Đuôi `_gt`, `_pred`, `_result`… được bỏ qua; file tên chung như `gt/a/gt.txt` lấy tên thư mục cha.
+3. Mỗi video chỉ đọc một file GT. Nếu có cả `.txt` và `.json`, tuỳ chọn "Có cả .txt và .json thì đọc" quyết định đọc file nào.
+4. GT `.txt`: MOT (`frame,id,x,y,w,h,…`, frame từ 1) hoặc JSONL. GT `.json`: JSON theo frame, mảng bản ghi, Mini CVAT JSON.
+5. Bấm **Chạy**. Mỗi video chạy Đánh giá GT (nhóm A, thêm B/C nếu bật) rồi đánh giá model so với GT. Video không có file kết quả có thể chạy YuNet trong trình duyệt mỗi N frame.
+
+Kết quả gồm bảng từng video (P, R, F1, AP, FP, FN, % frame đúng hoàn toàn, số nghi vấn GT, định dạng đã đoán) và dòng tổng gộp TP/FP/FN của cả folder. Bấm tên video để mở nó, kèm danh sách nghi vấn GT (`[` `]`) và đoạn model sai (`,` `.`). **Tải kết quả** xuất `folder_summary.csv`, `folder_gt_issues.csv`, `folder_model_errors.csv`.
+
+Video mở từ Đánh giá folder **không tự lưu nhãn**, để không ghi đè nhãn bạn đã lưu cho video cùng tên. Sửa GT xong hãy **Xuất**.
+
 ## Box model
 
 - **Chạy frame này**: YuNet trên frame hiện tại. **Tự chạy YuNet (tính trước)**: một bản video ẩn detect trước đầu phát nên box không trễ.

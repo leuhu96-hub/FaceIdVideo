@@ -147,9 +147,11 @@ tr.gA td:first-child{border-left:3px solid #fcc419}tr.gQ td:first-child{border-l
   <button class="btn" id="importBtn">Nhập</button>
   <button class="btn" id="exportBtn">Xuất</button>
   <button class="btn" id="gtBtn" title="Đánh giá chất lượng ground truth">Đánh giá GT</button>
+  <button class="btn" id="btBtn" title="Đánh giá cả folder video + GT (+ kết quả model)">Đánh giá folder</button>
   <button class="btn icon" id="helpBtn" title="Phím tắt">?</button>
   <button class="btn" id="sideBtn">☰ Đối tượng</button>
   <input type="file" id="fileIn" accept="video/*,.mp4,.webm,.mov,.mkv" hidden>
+  <input type="file" id="btVidIn" webkitdirectory multiple hidden><input type="file" id="btGtIn" webkitdirectory multiple hidden><input type="file" id="btMdIn" webkitdirectory multiple hidden>
   <input type="file" id="annIn" accept=".json,.jsonl,.xml,.zip,.txt" hidden>
   <input type="file" id="gtSfIn" accept=".onnx" hidden>
   <input type="file" id="mdIn" accept=".txt,.csv,.xml,.jsonl,.json" hidden>
@@ -271,7 +273,7 @@ function segDist(p,a,b){const dx=b[0]-a[0],dy=b[1]-a[1],l=dx*dx+dy*dy;let t=l?((
 function hexA(h,a){const n=parseInt(h.slice(1,7),16);return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`}
 function textOn(h){const n=parseInt(h.slice(1,7),16);return (0.299*(n>>16&255)+0.587*(n>>8&255)+0.114*(n&255))/255>0.62?'#111':'#fff'}
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-let toastT;function toast(m,ms=2400){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),ms)}
+let toastT,toastMute=false;function toast(m,ms=2400){if(toastMute)return;const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),ms)}
 const evPos=(e,el=cv)=>{const r=el.getBoundingClientRect();return [e.clientX-r.left,e.clientY-r.top]};
 function fmtTime(sec){const m=Math.floor(sec/60),s=sec-m*60;return String(m).padStart(2,'0')+':'+s.toFixed(3).padStart(6,'0')}
 
@@ -293,7 +295,7 @@ function roundKf(k){k.pts=k.pts.map(q=>[r2(q[0]),r2(q[1])])}
 /* ---------- persistence ---------- */
 try{const d=JSON.parse(localStorage.getItem(KEY)||'null');if(d&&d.labels&&d.labels.length){S.labels=d.labels;S.nextLabel=d.nextLabel||S.labels.length+1;S.nextId=d.nextId||1;store.videos=d.videos||{}}}catch(e){}
 curLabel=S.labels[0]?.id;
-let pT;function persist(){clearTimeout(pT);pT=setTimeout(()=>{try{if(S.name&&src?.kind==='video')store.videos[S.name]={w:S.w,h:S.h,fps:S.fps,tracks:S.tracks};localStorage.setItem(KEY,JSON.stringify({labels:S.labels,nextLabel:S.nextLabel,nextId:S.nextId,videos:store.videos}))}catch(e){}},500)}
+let pT;function persist(){if(S.batch)return;clearTimeout(pT);pT=setTimeout(()=>{try{if(S.name&&src?.kind==='video')store.videos[S.name]={w:S.w,h:S.h,fps:S.fps,tracks:S.tracks};localStorage.setItem(KEY,JSON.stringify({labels:S.labels,nextLabel:S.nextLabel,nextId:S.nextId,videos:store.videos}))}catch(e){}},500)}
 
 /* ---------- undo ---------- */
 function pushUndo(){undoSt.push(JSON.stringify(S.tracks));if(undoSt.length>200)undoSt.shift();redoSt=[];updBtns()}
@@ -440,7 +442,7 @@ async function detectFps(v){
   const cb=(now,meta)=>{ts.push(meta.mediaTime);if(ts.length<14&&!done)v.requestVideoFrameCallback(cb);else fin()};
   v.requestVideoFrameCallback(cb);v.play().catch(fin);setTimeout(fin,3000)})}
 async function openVideo(file){
- if(playing)stopPlay();$('#loading').classList.add('show');
+ if(playing)stopPlay();S.batch=false;$('#loading').classList.add('show');
  const v=document.createElement('video');v.muted=true;v.playsInline=true;v.preload='auto';v.src=URL.createObjectURL(file);
  const ok=await new Promise(r=>{v.onloadeddata=()=>r(true);v.onerror=()=>r(false);setTimeout(()=>r(v.readyState>=2),15000)});
  if(!ok){$('#loading').classList.remove('show');toast('Trình duyệt không đọc được video này — hãy thử MP4 (H.264) hoặc WebM',4000);return}
@@ -1178,6 +1180,150 @@ function loadModelFile(txt,name){
  for(const [f,L] of m)mdSet(f,L);MD.src=name;MD.show=true;$('#mdShow').checked=true;updModelSide();render();
  toast(`Đã nạp ${after} box model ở ${m.size} frame`+(before>after?` (gộp ${before-after} box trùng bằng NMS)`:''),4000)}
 
+
+/* ---------- ĐÁNH GIÁ CẢ FOLDER ----------
+   Folder video + folder GT (.txt hoặc .json, mỗi video đọc 1 file) + folder kết quả model (tuỳ chọn). Ghép theo tên file.
+   Mỗi video: nạp vào công cụ (không lưu tự động), chạy Đánh giá GT (A, + B/C nếu bật) rồi đánh giá model so với GT. */
+const BT={vids:[],gts:[],mds:[],pairs:[],running:false,cancel:false,opt:null};
+const BT_GENERIC=/^(gt|groundtruth|ground_truth|label|labels|annotation|annotations|anno|result|results|pred|preds|prediction|predictions|det|dets|detection|detections|output|out|video)$/i;
+function btStem(f){const parts=(f.webkitRelativePath||f.name).split('/');let n=parts.at(-1).replace(/\.[^.]+$/,'');if(BT_GENERIC.test(n)&&parts.length>1)n=parts.at(-2);
+ return n.toLowerCase().replace(/[._\- ]+(gt|groundtruth|ground_truth|labels?|annotations?|anno|results?|preds?|predictions?|dets?|detections?|output|out)$/,'').trim()}
+const BT_VID=/\.(mp4|webm|mov|mkv|m4v|avi)$/i,BT_ANN=/\.(txt|json|jsonl|xml)$/i;
+function btPair(){const pref=BT.opt?.prefer||'json',rank=f=>{const e=f.name.split('.').pop().toLowerCase();return e===pref?0:e==='jsonl'||e===(pref==='json'?'txt':'json')?1:2};
+ const idx=L=>{const m=new Map();for(const f of L){if(!BT_ANN.test(f.name))continue;const k=btStem(f);if(!m.has(k))m.set(k,[]);m.get(k).push(f)}for(const v of m.values())v.sort((a,b)=>rank(a)-rank(b));return m};
+ const G=idx(BT.gts),M=idx(BT.mds);
+ const old=new Map((BT.pairs||[]).map(p=>[p.video,p]));
+ BT.pairs=BT.vids.filter(f=>BT_VID.test(f.name)).sort((a,b)=>a.name.localeCompare(b.name)).map(v=>{const k=btStem(v),g=G.get(k)||[],m=M.get(k)||[],q=old.get(v),gt=g[0]||null,model=m[0]||null;return {key:k,video:v,gt,gtAlt:g.slice(1),model,res:q&&q.gt===gt&&q.model===model?q.res:null}});
+ const used=new Set(BT.pairs.map(p=>p.key));BT.orphans=[...G.keys()].filter(k=>!used.has(k))}
+function btBoxRows(txt,name){ // -> {rows,kind,fmt,off,nScore,detector} | {delegate} | null
+ const t=txt.trim();if(!t)return null;if(t[0]==='<')return {delegate:'xml'};
+ if(t[0]==='{'||t[0]==='['){
+  const F=/"?f(?:r)?ames"?\s*:/.test(t)?parseFramesJson(t):null;if(F)return {rows:F.vids.get(''),kind:'JSON frames',nScore:F.nScore,detector:F.detector};
+  const A=jsonArrayToJsonl(t);if(A){const J=parseJsonl(A);return btPick(J,'JSON')}
+  if(looksJsonl(t))return btPick(parseJsonl(t),'JSONL');return {delegate:'json'}}
+ const rows=[];let nScore=0;for(const line of t.split(/\r?\n/)){if(!line.trim()||line.trim()[0]==='#')continue;const v=line.split(/[,\s]+/).filter(Boolean).map(Number);if(v.length<6||!v.slice(0,6).every(isFinite))continue;
+  const sc=v.length>6&&isFinite(v[6])&&v[6]>=0&&v[6]<=1;if(sc)nScore++;rows.push({fr:Math.round(v[0]),id:String(Math.round(v[1])),b:v.slice(2,6),s:sc?v[6]:1,lm:v.length>=17?v.slice(7,17):null,label:null})}
+ return rows.length?{rows,kind:'MOT',fmt:'xywh',off:1,nScore}:null}
+function btPick(J,kind){const names=[...J.vids.keys()],stem=(S.name||'').replace(/\.[^.]+$/,'').toLowerCase();
+ const k=names.find(n=>n.toLowerCase()===stem||n.toLowerCase().split('/').pop()===stem)||names.reduce((a,b)=>J.vids.get(b).length>J.vids.get(a).length?b:a);return {rows:J.vids.get(k),kind,nScore:J.nScore}}
+async function btOpen(p,opt,withModel=true){ // nạp video + GT (+ model) vào công cụ; trả về thông tin định dạng
+ if(playing)stopPlay();const info={warn:[]};
+ const v=document.createElement('video');v.muted=true;v.playsInline=true;v.preload='auto';v.src=URL.createObjectURL(p.video);
+ const ok=await new Promise(r=>{v.onloadeddata=()=>r(true);v.onerror=()=>r(false);setTimeout(()=>r(v.readyState>=2),15000)});if(!ok)throw new Error('trình duyệt không đọc được video (cần MP4 H.264 hoặc WebM)');
+ if(!isFinite(v.duration))await new Promise(r=>{v.ondurationchange=()=>{if(isFinite(v.duration))r()};v.currentTime=1e101;setTimeout(r,5000)});
+ let fps=opt.fpsMode==='fixed'?opt.fps:await detectFps(v);if(!fps){fps=opt.fps;info.warn.push(`không tự nhận được FPS, dùng ${fps}`)}info.fps=fps;
+ src=makeVideoSource(v);setup(p.video.name,v.videoWidth,v.videoHeight,fps,v.duration,[]);S.batch=true;$('#fname').textContent=p.video.name+' · từ Đánh giá folder (không tự lưu)';
+ mdReset(false,1);MD.src='';
+ toastMute=true;try{
+  // GT
+  if(p.gt){const txt=await p.gt.text(),B=btBoxRows(txt,p.gt.name);info.gtKind=B?.kind||B?.delegate||'?';
+   if(!B)info.warn.push('không đọc được file GT');
+   else if(B.delegate){importData(txt,true);info.gtKind=B.delegate==='xml'?'XML':'JSON (Mini CVAT)'}
+   else{const g=B.fmt?{fmt:B.fmt,off:B.off,norm:false,how:'MOT'}:jlGuess(B.rows,'gt'),fmt=opt.gtFmt==='auto'?g.fmt:opt.gtFmt,off=opt.gtOff==='auto'?g.off:+opt.gtOff;
+    jlToGT(B.rows,fmt,off,g.norm,true);info.gtFmt=`${fmt}, frame đầu ${off}`;const mx=Math.max(...B.rows.map(r=>r.fr))-off;if(mx>=S.n)info.warn.push(`GT có frame ${mx} nhưng video chỉ có ${S.n} frame: kiểm tra FPS`)}}
+  else info.warn.push('không có GT');
+  if(withModel)await btLoadModel(p,opt,info);
+ }finally{toastMute=false}
+ renderLabels();changed(false);updModelSide();return info}
+async function btLoadModel(p,opt,info){ // nạp file kết quả model (ghép theo GT đang mở)
+ toastMute=true;try{
+  if(p.model){const txt=await p.model.text(),B=btBoxRows(txt,p.model.name);info.mdKind=B?.kind||B?.delegate||'?';
+   if(!B||B.delegate==='json')info.warn.push('không đọc được file kết quả model');
+   else if(B.delegate==='xml'){loadModelFile(txt,p.model.name);info.mdKind='XML'}
+   else{const g=B.fmt?{fmt:B.fmt,off:B.off,norm:false}:jlGuess(B.rows,'model'),fmt=opt.mdFmt==='auto'?g.fmt:opt.mdFmt,off=opt.mdOff==='auto'?g.off:+opt.mdOff;
+    jlToModel(B.rows,fmt,off,g.norm,p.model.name+(B.detector?` · ${B.detector}`:''),!B.nScore);info.mdFmt=`${fmt}, frame đầu ${off}`+(g.sc!=null?` (khớp GT ${P1(g.sc)})`:'');if(!B.nScore)info.warn.push('kết quả model không có score: AP không có ý nghĩa')}}
+ }finally{toastMute=false}
+ updModelSide();render();return info}
+async function btRunYunet(stride,prog){ // khi không có file kết quả: chạy YuNet trong trình duyệt mỗi `stride` frame
+ mdReset(false,stride);MD.src='YuNet (trong trình duyệt)';const fr=[];for(let f=0;f<S.n;f+=stride)fr.push(f);
+ for(let i=0;i<fr.length;i++){if(BT.cancel)throw new Error('Đã hủy');if(i%5===0)prog(`YuNet frame ${fr[i]} (${i+1}/${fr.length})`,i/fr.length);await src.seek(fr[i]);await detectFrame(fr[i]);MD.src='YuNet (trong trình duyệt)'}MD.step=stride}
+function btOptFromUI(){const g=id=>$(id)?.value,c=id=>$(id)?.checked;return {prefer:g('#btPref'),fpsMode:g('#btFpsMode'),fps:+g('#btFps')||25,gtFmt:g('#btGtFmt'),gtOff:g('#btGtOff'),mdFmt:g('#btMdFmt'),mdOff:g('#btMdOff'),
+ thr:+g('#btThr'),iou:+g('#btIou'),B:c('#btB'),C:c('#btC'),scan:g('#btScan'),yunet:c('#btYu'),yStride:Math.max(1,+g('#btYuStride')||5)}}
+function btGtOpt(o){const st=o.scan==='auto'?Math.max(1,Math.round(S.n/600)):Math.max(1,+o.scan||1);
+ return {label:0,B:o.B,C:o.C,stride:st,blurThr:60,sharpThr:150,darkThr:50,flatThr:10,missScore:0.8,minLen:3,minFace:32,sameThr:0.363,diffThr:0.2,longSide:1280,samples:8}}
+async function btRun(){
+ if(BT.running)return;BT.opt=btOptFromUI();btPair();const P=BT.pairs.filter(p=>p.gt);if(!P.length)return toast('Không có cặp video + GT nào');
+ for(const p of BT.pairs)p.res=null;BT.running=true;BT.cancel=false;GT.cancel=false;const o=BT.opt;$('#btRun').disabled=true;$('#btStop').hidden=false;$('#btProg').hidden=false;
+ const prog=(i,t,p)=>{const el=$('#btProgTxt');if(el)el.textContent=`Video ${i+1}/${P.length}: ${t}`;const b=$('#btProg i');if(b)b.style.width=((i+(p||0))/P.length*100).toFixed(1)+'%'};
+ try{for(let i=0;i<P.length;i++){const p=P[i];if(BT.cancel)break;const r={name:p.video.name,gtFile:p.gt.name,mdFile:p.model?.name||'',warn:[]};p.res=r;
+   try{prog(i,'đang mở',0);const info=await btOpen(p,o,false);Object.assign(r,{fps:info.fps,n:S.n,gtKind:info.gtKind,gtFmt:info.gtFmt||'',mdKind:info.mdKind||'',mdFmt:info.mdFmt||''});r.warn.push(...info.warn);
+    const D=gtData(0);r.gtBoxes=D.rows.length;r.gtIds=D.T.size;
+    if(D.rows.length){const go=btGtOpt(o);const st=stats(D),iss=labelChecks(D);let scan={issues:[],B:null,C:null};
+     if(go.B||go.C)scan=await scanVideo(D,go,(t,q)=>prog(i,'Đánh giá GT: '+t,q));
+     r.gt={opt:go,st,scan,issues:collapse([...iss,...scan.issues]),when:new Date().toLocaleString()}}
+    if(p.model){await btLoadModel(p,o,info);r.mdKind=info.mdKind||'';r.mdFmt=info.mdFmt||'';r.warn=[...new Set([...r.warn,...info.warn])]}
+    else if(!(o.C&&MD.dets.size)&&o.yunet)await btRunYunet(o.yStride,(t,q)=>prog(i,t,q));
+    if(MD.dets.size&&D.rows.length){r.ev=evalModel({label:0,thr:o.thr,iou:o.iou});r.mdSrc=MD.src}else if(!MD.dets.size)r.warn.push('không có kết quả model')}
+   catch(e){r.err=String(e.message||e);if(/hủy/.test(r.err))break}
+   const out=$('#btOut');if(out){out.innerHTML=btRender();btWire()}}}
+ finally{BT.running=false;const b=$('#btRun');if(b)b.disabled=false;const s2=$('#btStop');if(s2)s2.hidden=true;const t=$('#btProgTxt');if(t)t.textContent=BT.cancel?'Đã dừng':'Xong';const pb=$('#btProg i');if(pb&&!BT.cancel)pb.style.width='100%';
+  const ex=$('#btCsv');if(ex)ex.disabled=!BT.pairs.some(p=>p.res);toast(BT.cancel?'Đã dừng đánh giá folder':'Đánh giá folder xong',3000)}}
+function btTotals(){const R=BT.pairs.map(p=>p.res).filter(r=>r?.ev);if(!R.length)return null;const s=k=>R.reduce((a,r)=>a+r.ev[k],0),TP=s('TP'),FP=s('FP'),FN=s('FN'),P=TP/Math.max(TP+FP,1),Rc=TP/Math.max(TP+FN,1);
+ const sz=new Map();for(const r of R)for(const b of r.ev.bySize){const x=sz.get(b.n)||{n:b.n,tot:0,hit:0};x.tot+=b.tot;x.hit+=Math.round(b.R*b.tot);sz.set(b.n,x)}
+ return {n:R.length,TP,FP,FN,P,R:Rc,F1:2*P*Rc/Math.max(P+Rc,1e-9),perfect:s('perfect'),withAny:s('withAny'),bySize:EV_SIZES.map(([,,n])=>sz.get(n)).filter(Boolean),mIoU:R.reduce((a,r)=>a+r.ev.mIoU*r.ev.TP,0)/Math.max(TP,1)}}
+function btRender(){
+ const f3=x=>x==null?'–':x.toFixed(3),pc=x=>x==null?'–':P1(x),T=btTotals();let h='';
+ if(T)h+=`<div class="evk">${['P','R'].map(k=>`<div><b>${P1(T[k])}</b><span>${k==='P'?'Precision':'Recall'} (cả folder)</span></div>`).join('')}<div><b>${f3(T.F1)}</b><span>F1</span></div><div><b>${f3(T.mIoU)}</b><span>mIoU</span></div><div><b>${T.TP}</b><span>TP</span></div><div><b>${T.FP}</b><span>FP · box thừa</span></div><div><b>${T.FN}</b><span>FN · mặt sót</span></div><div><b>${P1(T.perfect/Math.max(T.withAny,1))}</b><span>frame đúng hoàn toàn (${T.perfect}/${T.withAny})</span></div></div>
+  <div class="mut">Gộp mọi frame của ${T.n} video (tính trên tổng TP/FP/FN, video dài nặng hơn). Recall theo cỡ mặt: ${T.bySize.map(b=>`${b.n} <b>${P1(b.hit/Math.max(b.tot,1))}</b> (${b.tot})`).join(' · ')}</div>`;
+ const rows=BT.pairs.map((p,i)=>({p,i,r:p.res}));
+ h+=`<h4>Từng video (${BT.pairs.length})</h4>`+tbl(rows,[['Video',x=>`<a href="#" data-bt="${x.i}">${esc(x.p.video.name)}</a>`],['GT',x=>x.p.gt?esc(x.p.gt.name)+(x.p.gtAlt.length?` <span class="mut">(bỏ ${x.p.gtAlt.map(f=>esc(f.name)).join(', ')})</span>`:''):'<span class="mut">thiếu</span>'],
+  ['Kết quả model',x=>x.p.model?esc(x.p.model.name):x.r?.mdSrc?esc(x.r.mdSrc):'<span class="mut">–</span>'],['Frame',x=>x.r?.n??''],['Box GT',x=>x.r?.gtBoxes??''],
+  ['P',x=>pc(x.r?.ev?.P)],['R',x=>x.r?.ev?'<b>'+P1(x.r.ev.R)+'</b>':'–'],['F1',x=>f3(x.r?.ev?.F1)],['AP',x=>f3(x.r?.ev?.AP)],['FP',x=>x.r?.ev?.FP??'–'],['FN',x=>x.r?.ev?.FN??'–'],
+  ['Frame đúng',x=>x.r?.ev?P1(x.r.ev.perfect/Math.max(x.r.ev.withAny,1)):'–'],['Nghi vấn GT',x=>x.r?.gt?x.r.gt.issues.length:'–'],
+  ['Ghi chú',x=>x.r?(x.r.err?'<b>Lỗi:</b> '+esc(x.r.err):esc([x.r.gtKind&&('GT '+x.r.gtKind+(x.r.gtFmt?' ('+x.r.gtFmt+')':'')),x.r.mdFmt&&('model '+x.r.mdFmt),`${x.r.fps} fps`,...x.r.warn].filter(Boolean).join(' · '))):`<span class="mut">${x.p.gt?'chưa chạy':'bỏ qua: không có GT'}</span>`]]);
+ if(BT.orphans?.length)h+=`<div class="note">GT không ghép được với video nào: ${BT.orphans.map(esc).join(', ')}</div>`;
+ const iss=BT.pairs.flatMap(p=>(p.res?.gt?.issues||[]).map(it=>({...it,v:p.video.name})));
+ if(iss.length){const by=new Map();for(const it of iss)by.set(it.kind,(by.get(it.kind)||0)+1);h+=`<h4>Nghi vấn GT theo loại (cả folder)</h4>`+tbl([...by].sort((a,b)=>b[1]-a[1]),[['Loại',x=>esc(x[0])],['Số lần',x=>x[1]]])}
+ return h}
+function btWire(){document.querySelectorAll('#btOut a[data-bt]').forEach(a=>a.onclick=async e=>{e.preventDefault();if(BT.running)return toast('Đang chạy, hãy chờ hoặc bấm Dừng');const p=BT.pairs[+a.dataset.bt];
+ closeModal();try{await btOpen(p,BT.opt||btOptFromUI());const r=p.res;
+  if(r?.gt){GT.res=r.gt;GT.issues=r.gt.issues;GT.cur=-1;renderGTSide()}
+  if(!p.model&&r?.mdSrc?.startsWith('YuNet'))toast('Video này dùng YuNet trong trình duyệt: bấm "Tự chạy YuNet" ở mục Box model để xem lại box',5000);
+  else if(r?.ev){EV.res=r.ev;EV.segs=r.ev.segs;EV.cur=-1;EV.opt=r.ev.opt;renderEvalSide()}
+  drawTimeline();render();toast(`Đã mở ${p.video.name}: dùng [ ] cho nghi vấn GT, , . cho đoạn model sai. Sửa GT xong hãy Xuất, công cụ không tự lưu video mở từ folder.`,6000)}
+ catch(err){toast('Không mở được: '+(err.message||err),5000)}})}
+async function btExport(){const P=BT.pairs.filter(p=>p.res);if(!P.length)return;const q=v=>{const t=String(v??'');return /[",\n]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t};
+ const csv=(head,rows)=>'﻿'+[head.join(','),...rows.map(r=>r.map(q).join(','))].join('\n');const T=btTotals();
+ const sum=csv(['video','gt_file','model_file','fps','frames','gt_boxes','P','R','F1','AP','mIoU','TP','FP','FN','frames_perfect','frames_with_boxes','gt_issues','note'],
+  [...P.map(p=>{const r=p.res,e=r.ev;return [r.name,r.gtFile,r.mdFile||r.mdSrc||'',r.fps,r.n,r.gtBoxes,e?.P?.toFixed(4),e?.R?.toFixed(4),e?.F1?.toFixed(4),e?.AP?.toFixed(4),e?.mIoU?.toFixed(4),e?.TP,e?.FP,e?.FN,e?.perfect,e?.withAny,r.gt?.issues.length,r.err||r.warn.join('; ')]}),
+   ...(T?[['TỔNG','','','','','',T.P.toFixed(4),T.R.toFixed(4),T.F1.toFixed(4),'',T.mIoU.toFixed(4),T.TP,T.FP,T.FN,T.perfect,T.withAny,'','']]:[])]);
+ const iss=csv(['video','frame','frame_mot','id','group','kind','detail'],P.flatMap(p=>(p.res.gt?.issues||[]).map(it=>[p.res.name,it.f,it.f+1,it.id,it.grp,it.kind,String(it.detail).replace(/<[^>]+>/g,'')])));
+ const err=csv(['video','frame','frame_mot','n_gt','n_det','tp','fp','fn','missed_ids'],P.flatMap(p=>(p.res.ev?.per||[]).map(x=>[p.res.name,x.f,x.f+1,x.g,x.d,x.tp,x.fp,x.fn,x.fnId.join(' ')])));
+ const files={'folder_summary.csv':sum,'folder_gt_issues.csv':iss,'folder_model_errors.csv':err};
+ if(window.JSZip){saveFile(await zipBlob(files),'folder_eval.zip')}else for(const [k,v] of Object.entries(files))await saveFile(v,k)}
+function btFolderInfo(){const nv=BT.vids.filter(f=>BT_VID.test(f.name)).length,ng=BT.gts.filter(f=>BT_ANN.test(f.name)).length,nm=BT.mds.filter(f=>BT_ANN.test(f.name)).length;
+ $('#btVidN').textContent=nv?`${nv} video`:'chưa chọn';$('#btGtN').textContent=ng?`${ng} file`:'chưa chọn';$('#btMdN').textContent=nm?`${nm} file`:'không bắt buộc';
+ btPair();const P=BT.pairs,ok=P.filter(p=>p.gt).length,wm=P.filter(p=>p.model).length;
+ $('#btPairs').innerHTML=P.length?`<b>${ok}/${P.length}</b> video có GT${BT.mds.length?`, <b>${wm}</b> có kết quả model`:''}.`+(P.some(p=>!p.gt)?` Thiếu GT: ${P.filter(p=>!p.gt).map(p=>esc(p.video.name)).slice(0,8).join(', ')}${P.filter(p=>!p.gt).length>8?'…':''}.`:'')+(BT.orphans.length?` GT thừa: ${BT.orphans.slice(0,8).map(esc).join(', ')}.`:''):'';
+ $('#btRun').disabled=!ok||BT.running;$('#btOut').innerHTML=btRender();btWire()}
+function showBatch(){if(playing)togglePlay();const o=BT.opt||{prefer:'json',fpsMode:'auto',fps:25,gtFmt:'auto',gtOff:'auto',mdFmt:'auto',mdOff:'auto',thr:0.5,iou:0.5,B:false,C:false,scan:'auto',yunet:false,yStride:5};
+ const sel=(id,opts,v)=>`<select class="btn" id="${id}">${opts.map(([k,t])=>`<option value="${k}"${String(k)===String(v)?' selected':''}>${t}</option>`).join('')}</select>`;
+ const FM=[['auto','Tự đoán'],['xywh','[x,y,w,h]'],['xyxy','[x1,y1,x2,y2]'],['cxcywh','[cx,cy,w,h]']],FO=[['auto','Tự đoán'],['0','0'],['1','1']];
+ openModal('Đánh giá cả folder',`<div class="gtcfg">
+  <div class="mdrow" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="btn primary" id="btVidBtn">Folder video…</button><span class="mut" id="btVidN"></span>
+   <button class="btn primary" id="btGtBtn">Folder GT…</button><span class="mut" id="btGtN"></span><button class="btn" id="btMdBtn">Folder kết quả model…</button><span class="mut" id="btMdN"></span></div>
+  <div class="gtdesc" id="btPairs"></div>
+  <div class="note">Ghép theo tên file, không phân biệt hoa thường: <code>videos/a.mp4</code> ↔ <code>gt/a.txt</code> hoặc <code>gt/a.json</code> ↔ <code>results/a.json</code>. Bỏ qua đuôi như <code>_gt</code>, <code>_pred</code>, <code>_result</code>; file tên chung (<code>gt.txt</code>) lấy tên thư mục cha. GT .txt là MOT (<code>frame,id,x,y,w,h,…</code>, frame từ 1) hoặc JSONL; .json là JSON theo frame, mảng bản ghi, Mini CVAT JSON.</div>
+  <details open><summary class="mut">Tuỳ chọn</summary><div class="gtth">
+   <label>Có cả .txt và .json thì đọc ${sel('btPref',[['json','.json'],['txt','.txt']],o.prefer)}</label>
+   <label>FPS ${sel('btFpsMode',[['auto','tự nhận'],['fixed','cố định']],o.fpsMode)} <input class="num" id="btFps" value="${o.fps}" title="Dùng khi chọn cố định, hoặc khi không tự nhận được"></label>
+   <label>bbox GT (JSON) ${sel('btGtFmt',FM,o.gtFmt)}</label><label>frame đầu GT ${sel('btGtOff',FO,o.gtOff)}</label>
+   <label>bbox model ${sel('btMdFmt',FM,o.mdFmt)}</label><label>frame đầu model ${sel('btMdOff',FO,o.mdOff)}</label>
+   <label>Score ≥<input class="num" id="btThr" value="${o.thr}"></label><label>IoU ≥<input class="num" id="btIou" value="${o.iou}"></label>
+   <label class="chk"><input type="checkbox" id="btB" ${o.B?'checked':''}>Đánh giá GT nhóm B (chất lượng ảnh)</label><label class="chk"><input type="checkbox" id="btC" ${o.C?'checked':''}>Nhóm C (đối chiếu YuNet)</label>
+   <label>Quét mỗi <input class="num" id="btScan" value="${o.scan}" title="auto = khoảng 600 frame mỗi video"> frame</label>
+   <label class="chk"><input type="checkbox" id="btYu" ${o.yunet?'checked':''}>Video không có file kết quả: chạy YuNet trong trình duyệt mỗi</label><label><input class="num" id="btYuStride" value="${o.yStride}"> frame</label></div></details>
+  <div class="row"><button class="btn primary" id="btRun" disabled>Chạy</button><button class="btn" id="btStop" hidden>Dừng</button><button class="btn" id="btCsv" ${BT.pairs.some(p=>p.res)?'':'disabled'}>Tải kết quả (.zip CSV)</button></div>
+  <div id="btProg" hidden><div class="pbar"><i></i></div><span class="mut" id="btProgTxt"></span></div>
+  <div class="note">"Tự đoán": file MOT luôn là [x,y,w,h], frame từ 1; JSON thì kết quả model được đoán bằng cách so với GT, GT JSON đoán theo hình dạng box. Nhóm A luôn chạy; nhóm B/C tua qua từng video nên lâu hơn. Bấm tên video trong bảng để mở và xem từng lỗi. Video mở từ đây không tự lưu nhãn, nên nhãn đã lưu của bạn không bị ghi đè.</div></div>
+  <div id="btOut"></div>`);
+ $('#modal').classList.add('wide');
+ $('#btVidBtn').onclick=()=>$('#btVidIn').click();$('#btGtBtn').onclick=()=>$('#btGtIn').click();$('#btMdBtn').onclick=()=>$('#btMdIn').click();
+ $('#btPref').onchange=()=>{BT.opt={...(BT.opt||{}),prefer:$('#btPref').value};btFolderInfo()};
+ $('#btRun').onclick=btRun;$('#btStop').onclick=()=>{BT.cancel=true;GT.cancel=true};$('#btCsv').onclick=btExport;btFolderInfo();
+ if(BT.running){$('#btRun').disabled=true;$('#btStop').hidden=false;$('#btProg').hidden=false}}
+for(const [id,k] of [['#btVidIn','vids'],['#btGtIn','gts'],['#btMdIn','mds']])$(id).onchange=e=>{BT[k]=[...e.target.files];e.target.value='';for(const p of BT.pairs)p.res=null;if($('#btPairs'))btFolderInfo()};
+
 /* ---------- ĐÁNH GIÁ MODEL SO VỚI GT (cả video) ----------
    Cùng cách tính với eval_face_postproc.py: mỗi frame ghép box model (score giảm dần) với box GT có IoU lớn nhất >= ngưỡng,
    mỗi box GT chỉ ghép 1 lần. AP tính trên mọi box (không lọc score). Số frame trong công cụ đếm từ 0. */
@@ -1368,6 +1514,7 @@ $('#mdThr').oninput=e=>{MD.thr=+e.target.value;$('#mdThrO').textContent=MD.thr.t
 $('#mdRun').onclick=()=>{if(!src)return toast('Hãy mở video trước');if(MD.full){mdReset(false,1)}detectFrame(S.frame)};
 $('#mdFile').onclick=()=>$('#mdIn').click();$('#mdIn').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(f)loadModelFile(await f.text(),f.name)};
 $('#mdEvalBtn').onclick=showEval;$('#evOpen').onclick=showEval;$('#evPrev').onclick=()=>evGoto(EV.cur-1);$('#evNext').onclick=()=>evGoto(EV.cur+1);
+$('#btBtn').onclick=showBatch;
 $('#mdClear').onclick=()=>{mdReset(false,1);MD.src='';updModelSide();render()};$('#mdAdd').onclick=addModelToGT;
 $('#gtBtn').onclick=showGT;$('#gtOpen').onclick=showGT;
 updModelSide();$('#gtPrev').onclick=()=>gotoIssue(Math.max(0,GT.cur-1));$('#gtNext').onclick=()=>gotoIssue(Math.min(GT.issues.length-1,GT.cur+1));
