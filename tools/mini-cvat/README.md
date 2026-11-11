@@ -88,7 +88,10 @@ Nút **Đánh giá folder** trên thanh công cụ chấm nhiều video một l�
 4. GT `.txt`: MOT (`frame,id,x,y,w,h,…`, frame từ 1) hoặc JSONL. GT `.json`: JSON theo frame, mảng bản ghi, Mini CVAT JSON.
 5. Bấm **Chạy**. Mỗi video chạy Đánh giá GT (nhóm A, thêm B/C nếu bật) rồi đánh giá model so với GT. Video không có file kết quả có thể chạy YuNet trong trình duyệt mỗi N frame.
 
-Kết quả gồm bảng từng video (P, R, F1, AP, FP, FN, % frame đúng hoàn toàn, số nghi vấn GT, định dạng đã đoán) và dòng tổng gộp TP/FP/FN của cả folder. Bấm tên video để mở nó, kèm danh sách nghi vấn GT (`[` `]`) và đoạn model sai (`,` `.`). **Tải kết quả** xuất `folder_summary.csv`, `folder_gt_issues.csv`, `folder_model_errors.csv`.
+Kết quả có hai phần:
+
+- **Đánh giá model so với GT**: bảng từng video (P, R, F1, AP, FP, FN, % frame đúng hoàn toàn, định dạng đã đoán) và dòng tổng gộp TP/FP/FN của cả folder.
+- **Đánh giá ground truth cả folder**: cùng các mục như báo cáo từng file nhưng gộp mọi video (kết luận nhanh, tham số gợi ý đủ cho mọi video, tổng quan từng video, cỡ mặt theo input, hình dạng, thời gian và track, chuyển động, tương tác, chất lượng ảnh, đối chiếu YuNet), bảng nghi vấn chung lọc theo loại / video, và báo cáo đầy đủ của từng video (mở rộng được). Bấm tên video để mở nó, kèm danh sách nghi vấn GT (`[` `]`) và đoạn model sai (`,` `.`). **Tải kết quả** xuất `folder_summary.csv`, `folder_model_errors.csv`, `folder_gt_report.html` (báo cáo GT cả folder + từng video), `folder_gt_issues.csv`, `folder_gt_events.csv`, `folder_gt_ids.csv`, `folder_gt_attrs.csv` (khi bật nhóm B) và `folder_suggested_params.json` (tham số chung + từng video).
 
 Video mở từ Đánh giá folder **không tự lưu nhãn**, để không ghi đè nhãn bạn đã lưu cho video cùng tên. Sửa GT xong hãy **Xuất**.
 

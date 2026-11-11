@@ -115,6 +115,7 @@ tr.gA td:first-child{border-left:3px solid #fcc419}tr.gQ td:first-child{border-l
 .gtpairs{display:flex;flex-direction:column;gap:6px}.gtpairs div{display:flex;gap:6px;align-items:center;font-size:12px}.gtpairs img{width:64px;height:64px;border-radius:4px}
 #mdSide .mdrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;font-size:12px}#mdInfo{font-size:12px;line-height:1.5}
 #mdEval .gtnav{display:flex;align-items:center;gap:6px;margin:6px 0}#mdEval .gtnav span{flex:1;text-align:center;color:var(--muted)}#mdEval .gtdesc{font-size:12px;line-height:1.45}
+.bth{margin:18px 0 6px;font-size:15px;border-bottom:1px solid var(--line);padding-bottom:4px}details.btgv{border:1px solid var(--line);border-radius:8px;padding:4px 10px;margin:6px 0}details.btgv summary{cursor:pointer}details.btgv .gtfilter{display:none}
 .evk{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:6px;margin:8px 0}.evk div{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 8px}.evk b{display:block;font-size:18px}.evk span{font-size:11px;color:var(--muted)}
 #gtSide .gtnav{display:flex;align-items:center;gap:6px;margin-bottom:6px}#gtSide .gtnav span{flex:1;text-align:center;color:var(--muted)}#gtSide .gtdesc{font-size:12px;line-height:1.45}
 @media (max-width:820px){
@@ -1216,6 +1217,91 @@ function jlJoint(G,MB,opt){ // thử mọi tổ hợp (định dạng, frame đ�
   for(const mf of mF)for(const mo of mO){let hit=0;for(const r of Ms){const L=ref.get(r.fr-mo);if(!L)continue;const b=jlBox(r.b,mf,mn);if(b.w>0&&b.h>0&&L.some(g=>iou(b,g)>=0.5))hit++}
    const sc=hit/Ms.length;if(!best||sc>best.sc+1e-9||(Math.abs(sc-best.sc)<1e-9&&go===mo&&best.go!==best.mo))best={gf,go,mf,mo,sc}}}
  return best&&best.sc>=0.2?best:null}
+
+/* ---------- BÁO CÁO GT CẢ FOLDER: cùng các mục như báo cáo từng file, gộp mọi video ---------- */
+function btGtPool(){
+ const L=BT.pairs.map((p,i)=>({p,i,r:p.res?.gt})).filter(x=>x.r);if(!L.length)return null;
+ const cat=k=>L.flatMap(x=>x.r.st[k]||[]),W=x=>x.r.st.overview.boxes,TB=L.reduce((a,x)=>a+W(x),0)||1,o={n:L.length,L};
+ o.byInput={};for(const k of Object.keys(L[0].r.st.byInput)){const h={};for(const nm of [...SIZE_NAMES,'inRange'])h[nm]=L.reduce((a,x)=>a+x.r.st.byInput[k][nm]*W(x),0)/TB;o.byInput[k]=h}
+ o.suggestSize=Object.keys(o.byInput).reduce((a,b)=>o.byInput[b].inRange>o.byInput[a].inRange?b:a,'native');
+ for(const k of ['side','ar','cx','lens','gaps','ious','disp'])o[k]=cat(k);
+ o.arP=[0.5,5,50,95,99.5].map(q=>pctl(o.ar,q));o.suggestAr=o.ar.length?[+(Math.min(pctl(o.ar,0.5)*0.9,0.6)).toFixed(2),+(Math.max(pctl(o.ar,99.5)*1.1,1.3)).toFixed(2)]:[0.6,1.3];
+ o.edge=L.reduce((a,x)=>a+x.r.st.edge*W(x),0)/TB;o.iouLt03=o.ious.filter(v=>v<0.3).length/Math.max(1,o.ious.length);
+ const cw=L.filter(x=>isFinite(x.r.st.cam));o.cam=cw.length?cw.reduce((a,x)=>a+x.r.st.cam*x.r.st.overview.labeled,0)/Math.max(1,cw.reduce((a,x)=>a+x.r.st.overview.labeled,0)):NaN;
+ o.camVids=L.filter(x=>x.r.st.cam>0.2).map(x=>x.p.video.name);
+ o.reapp=L.reduce((a,x)=>a+x.r.st.reapp,0);o.maxGap=Math.max(...L.map(x=>x.r.st.maxGap));o.maxLost=Math.max(...L.map(x=>x.r.st.maxLost));o.iou1=Math.min(...L.map(x=>x.r.st.iou1));
+ o.events=L.flatMap(x=>x.r.st.events.map(e=>({...e,v:x.p.video.name,pi:x.i}))).sort((a,b)=>(b.crossed-a.crossed)||(b.maxIou-a.maxIou));
+ o.issues=L.flatMap(x=>x.r.issues.map((it,j)=>({...it,v:x.p.video.name,pi:x.i,ii:j})));
+ const Bs=L.filter(x=>x.r.scan.B);if(Bs.length){const B={attrs:Bs.flatMap(x=>x.r.scan.B.attrs),samples:{},cuts:Bs.reduce((a,x)=>a+x.r.scan.B.cuts.length,0),dups:Bs.reduce((a,x)=>a+x.r.scan.B.dups.length,0),opt:Bs[0].r.opt};
+  for(const k of Object.keys(Bs[0].r.scan.B.samples)){const all=[];for(const x of Bs)for(const it of x.r.scan.B.samples[k])all.push({score:it.score,item:{...it.item,cap:x.p.video.name.replace(/\.[^.]+$/,'')+' '+it.item.cap}});all.sort((a,b)=>b.score-a.score);B.samples[k]=k==='ngẫu nhiên'?all.filter((_,i)=>i%Math.max(1,Math.floor(all.length/8))===0).slice(0,8):all.slice(0,8)}o.B=B}
+ const Cs=L.filter(x=>x.r.scan.C);if(Cs.length){const tag=(x,a)=>a.map(t=>({...t,cap:x.p.video.name.replace(/\.[^.]+$/,'')+' '+t.cap}));
+  o.C={bias:Cs.flatMap(x=>x.r.scan.C.bias),missing:Cs.reduce((a,x)=>a+x.r.scan.C.missing.length,0),notface:Cs.reduce((a,x)=>a+x.r.scan.C.notface.length,0),
+   thumbsMiss:Cs.flatMap(x=>tag(x,x.r.scan.C.thumbsMiss)).slice(0,12),thumbsNot:Cs.flatMap(x=>tag(x,x.r.scan.C.thumbsNot)).slice(0,12),pairs:Cs.flatMap(x=>x.r.scan.C.pairs.map(q=>({...q,v:x.p.video.name})))}}
+ return o}
+function btGtFindings(o){const bi=o.byInput,out=[];
+ out.push(`Ở input 640, <b>${P1(bi['640']['<10'])}</b> mặt nhỏ hơn 10 px (YuNet gần như không thấy); ở native là <b>${P1(bi.native['<10'])}</b>. Cỡ input giữ nhiều mặt trong vùng 10–300 px nhất cho cả folder: <b>${o.suggestSize}</b>.`);
+ if(bi.native['>300']>0.01)out.push(`${P1(bi.native['>300'])} mặt lớn hơn 300 px: nên thu nhỏ ảnh trước khi detect.`);
+ out.push(`${P1(o.iouLt03)} cặp frame liên tiếp có IoU &lt; 0,3: `+(o.iouLt03>0.05?'tracker chỉ dùng IoU sẽ hay mất dấu, cần Kalman tốt / CMC.':'chuyển động chậm, tracker IoU + Kalman là đủ.'));
+ if(isFinite(o.cam))out.push(`${P1(o.cam)} frame có mọi người cùng dịch một hướng`+(o.camVids.length?`; camera lia / rung rõ ở ${o.camVids.length} video (${o.camVids.slice(0,5).map(esc).join(', ')}${o.camVids.length>5?'…':''}): nên bật CMC.`:': camera khá ổn định.'));
+ out.push(`${o.reapp} lần một ID vắng hơn 1 giây rồi quay lại`+(o.reapp?': cần gộp tracklet dài hạn (HAC).':'.'));
+ const nc=o.events.filter(e=>e.crossed).length;out.push(`${o.events.length} đoạn 2 người sát nhau, ${nc} đoạn đi ngang qua nhau`+(nc?': nơi dễ đổi ID nhất, nên có ReID.':'.'));
+ if(o.B&&o.B.attrs.length){const n=o.B.attrs.length,c=k=>o.B.attrs.filter(a=>a.blur===k||a.light===k).length/n;out.push(`Trong box GT: <b>${P1(c('mờ'))}</b> mờ, <b>${P1(c('tối'))}</b> tối, ${P1(c('chói'))} chói.`+(o.B.cuts?` ${o.B.cuts} lần cắt cảnh.`:''))}
+ if(o.C){if(o.C.bias.length>=20){const m=k=>med(o.C.bias.map(b=>b[k])),sw=m(2),sh=m(3),dy=m(1),dev=Math.max(Math.abs(sw-1),Math.abs(sh-1),Math.abs(m(0)),Math.abs(dy));
+   out.push(`Quy ước box: IoU trung vị GT–model ${m(4).toFixed(2)}. `+(dev>0.08?`<b>Lệch quy ước</b>: box GT ${(sw+sh)/2>1?'to':'nhỏ'} hơn box model ~${Math.abs((sw+sh)/2-1)*100|0}%, tâm lệch dọc ${(dy*100).toFixed(0)}%.`:'Cùng quy ước với model.'))}
+  if(o.C.missing)out.push(`<b>${o.C.missing}</b> đoạn mặt có thể bị thiếu nhãn.`);if(o.C.notface)out.push(`${o.C.notface} box GT mà model không thấy mặt.`);
+  if(o.C.pairs.length)out.push(`Danh tính: ${o.C.pairs.filter(p=>p.kind==='cùng người 2 ID').length} cặp ID có thể là cùng người, ${o.C.pairs.filter(p=>p.kind!=='cùng người 2 ID').length} ID có thể chứa 2 người.`)}
+ const worst=o.L.map(x=>({v:x.p.video.name,n:x.r.issues.length})).sort((a,b)=>b.n-a.n).filter(x=>x.n).slice(0,3);
+ out.push(`<b>${o.issues.length}</b> nghi vấn trong ${o.n} video`+(worst.length?`; nhiều nhất: ${worst.map(x=>`${esc(x.v)} (${x.n})`).join(', ')}`:'')+'. Bấm vào từng dòng để mở video đó đúng chỗ.');return out}
+function btIssueRows(L,cap=400){if(!L.length)return '<div class="mut">Không có nghi vấn nào.</div>';
+ return `<table><tr><th>Video</th><th>Frame</th><th>ID</th><th>Loại</th><th>Chi tiết</th></tr>${L.slice(0,cap).map(i=>`<tr class="gti g${i.grp}" data-bv="${i.pi}" data-bi="${i.ii}"><td>${esc(i.v)}</td><td>${i.f}</td><td>${i.id>=0?'#'+i.id:'–'}</td><td>${esc(i.kind)}</td><td>${esc(i.detail)}</td></tr>`).join('')}</table>`+(L.length>cap?`<div class="mut">Hiện ${cap}/${L.length} dòng; lọc theo loại hoặc video để xem phần còn lại, hoặc xem folder_gt_issues.csv.</div>`:'')}
+function btGtRender(o,forExport){
+ if(!o)return '';const kinds={};o.issues.forEach(i=>kinds[i.kind]=(kinds[i.kind]||0)+1);
+ let h=`<div class="gtbox"><b>Kết luận nhanh cho cả folder</b> <span class="mut">(${o.n} video)</span><ul>${btGtFindings(o).map(x=>`<li>${x}</li>`).join('')}</ul>
+  <b>Tham số gợi ý cho eval_face_postproc.py (đủ cho mọi video)</b><br><code>--size ${o.suggestSize} --max-gap ${o.maxGap}</code> · tracker max_lost=${o.maxLost}, iou1=${o.iou1} · lọc hình học ar=[${o.suggestAr.join(', ')}]</div>`;
+ h+=`<h4>Nghi vấn (${o.issues.length})</h4>`+(forExport?'':`<div class="row"><select class="btn" id="btgKind"><option value="">Tất cả loại</option>${Object.entries(kinds).sort((a,b)=>b[1]-a[1]).map(([k,n])=>`<option value="${esc(k)}">${esc(k)} (${n})</option>`).join('')}</select>
+  <select class="btn" id="btgVid"><option value="">Mọi video</option>${o.L.map(x=>`<option value="${x.i}">${esc(x.p.video.name)} (${x.r.issues.length})</option>`).join('')}</select></div>`)+`<div class="gtt" id="btgIssues">${btIssueRows(o.issues,forExport?1e9:400)}</div>`;
+ const ov=o.L.map(x=>({...x.r.st.overview,pi:x.i,iss:x.r.issues.length})),sum=k=>ov.reduce((a,x)=>a+(+x[k]||0),0);
+ h+=`<h4>1. Tổng quan</h4>`+tbl([...ov,{video:'TỔNG',res:'',fps:'',frames:sum('frames'),labeled:sum('labeled'),boxes:sum('boxes'),ids:sum('ids'),mean:(sum('boxes')/Math.max(1,sum('labeled'))).toFixed(2),max:Math.max(...ov.map(x=>x.max)),iss:sum('iss')}],
+  [['Video',x=>x.pi!=null&&!forExport?`<a href="#" data-bv="${x.pi}">${esc(x.video)}</a>`:`<b>${esc(x.video)}</b>`],['Độ phân giải',x=>x.res],['FPS',x=>x.fps],['Frame',x=>x.frames],['Frame có nhãn',x=>x.labeled],['Box',x=>x.boxes],['ID',x=>x.ids],['Mặt/frame TB',x=>x.mean],['Tối đa',x=>x.max],['Nghi vấn',x=>x.iss]]);
+ h+=`<h4>2. Kích thước mặt</h4><div class="gtcharts">${hist(o.side,{log:true,vlines:[[10,'#ff6b6b'],[24,'#888'],[64,'#888'],[300,'#ff6b6b']],title:'Cỡ mặt ở độ phân giải gốc (px, log), mọi video',xl:'cạnh dài box'})}</div>
+  ${tbl(Object.entries(o.byInput).map(([k,v])=>({k,...v})),[['Input',x=>x.k],...SIZE_NAMES.map(n=>[n,x=>P1(x[n])]),['Trong 10–300',x=>'<b>'+P1(x.inRange)+'</b>']])}
+  <div class="mut">Từng video, % mặt &lt;10 px ở input 640 / native: ${o.L.map(x=>`${esc(x.p.video.name)} ${P1(x.r.st.byInput['640']['<10'])} / ${P1(x.r.st.byInput.native['<10'])}`).join(' · ')}</div>`;
+ h+=`<h4>3. Hình dạng &amp; vị trí</h4><p>w/h (phân vị 0,5/5/50/95/99,5): ${o.arP.map(x=>isFinite(x)?x.toFixed(2):'–').join(', ')} → ngưỡng gợi ý <b>[${o.suggestAr.join(', ')}]</b>. Mặt chạm mép: ${P1(o.edge)}.</p>
+  <div class="gtcharts">${hist(o.ar,{title:'Tỉ lệ w/h',vlines:o.suggestAr.map(x=>[x,'#ff6b6b']),color:'#cc5de8'})}${hist(o.cx,{lo:0,hi:1,title:'Vị trí ngang của tâm mặt',xl:'x / width',color:'#20c997'})}</div>`;
+ h+=`<h4>4. Thời gian &amp; track</h4><p>Khoảng trống bên trong ID: ${o.gaps.length} lần. Gợi ý <code>max_gap</code> = ${o.maxGap}, <code>max_lost</code> = ${o.maxLost} (lấy giá trị lớn nhất giữa các video). Vắng &gt; 1 giây rồi quay lại: ${o.reapp} lần.</p>
+  <div class="gtcharts">${hist(o.lens,{title:'Độ dài track (số box / ID)',color:'#748ffc'})}${o.gaps.length?hist(o.gaps,{title:'Khoảng trống trong 1 ID (frame)',vlines:[[o.maxGap,'#51cf66'],[o.maxLost,'#ff6b6b']],color:'#fcc419'}):''}</div>
+  ${tbl(o.L,[['Video',x=>esc(x.p.video.name)],['max_gap',x=>x.r.st.maxGap],['max_lost',x=>x.r.st.maxLost],['Vắng >1s rồi quay lại',x=>x.r.st.reapp],['Track',x=>x.r.st.lens.length],['Track ngắn nhất',x=>x.r.st.lens.length?Math.min(...x.r.st.lens):'–']])}`;
+ h+=`<h4>5. Chuyển động</h4><p>IoU cùng ID giữa 2 frame liên tiếp &lt; 0,3: <b>${P1(o.iouLt03)}</b>. Dấu hiệu camera lia: ${isFinite(o.cam)?P1(o.cam):'–'}.</p><div class="gtcharts">${hist(o.ious,{lo:0,hi:1,title:'IoU cùng ID giữa 2 frame',vlines:[[0.3,'#ff6b6b']],color:'#51cf66'})}${hist(o.disp.map(x=>Math.min(x,2)),{lo:0,hi:2,title:'Độ dịch tâm / chiều cao mặt',color:'#ff922b'})}</div>
+  ${tbl(o.L,[['Video',x=>esc(x.p.video.name)],['IoU<0,3',x=>P1(x.r.st.iouLt03)],['Camera lia',x=>isFinite(x.r.st.cam)?(x.r.st.cam>0.2?'<b>'+P1(x.r.st.cam)+'</b>':P1(x.r.st.cam)):'–'],['iou1 gợi ý',x=>x.r.st.iou1]])}`;
+ h+=`<h4>6. Tương tác giữa các ID</h4>${tbl(o.events.slice(0,20),[['Video',e=>esc(e.v)],['ID',e=>`#${e.id1} – #${e.id2}`],['Frame',e=>forExport?`${e.start}–${e.end}`:`<a href="#" data-bv="${e.pi}" data-go="${e.start}">${e.start}–${e.end}</a>`],['IoU max',e=>e.maxIou.toFixed(2)],['Đi ngang',e=>e.crossed?'<b>có</b>':'']])}`+(o.events.length>20?`<div class="mut">Hiện 20/${o.events.length} đoạn (đi ngang trước); đủ trong folder_gt_events.csv.</div>`:'');
+ const B=o.B;if(B){const n=B.attrs.length||1,c=k=>B.attrs.filter(a=>a.blur===k||a.light===k).length/n;
+  h+=`<h4>9. Chất lượng ảnh trong box</h4><p>Mờ ${P1(c('mờ'))} · vừa ${P1(c('vừa'))} · nét ${P1(c('nét'))} · tối ${P1(c('tối'))} · chói ${P1(c('chói'))} (${B.attrs.length} box được quét).</p>
+  <div class="gtcharts">${hist(B.attrs.map(a=>a.sharpness),{log:true,title:'Độ nét (log)',vlines:[[B.opt.blurThr,'#ff6b6b'],[B.opt.sharpThr,'#51cf66']],color:'#748ffc'})}${hist(B.attrs.map(a=>a.brightness),{lo:0,hi:255,title:'Độ sáng',vlines:[[B.opt.darkThr,'#ff6b6b'],[200,'#ff6b6b']],color:'#fcc419'})}</div>
+  ${Object.entries(B.samples).map(([k,L])=>`<div class="mut">${k}</div>${thumbs(L.map(x=>x.item))}`).join('')}<p>Cắt cảnh: ${B.cuts} · Frame lặp: ${B.dups}</p>`}
+ const C=o.C;if(C){h+=`<h4>10. Đối chiếu bằng model</h4>`;
+  if(C.bias.length>=20){const m=k=>med(C.bias.map(b=>b[k]));h+=`<p>${C.bias.length} cặp box GT–model khớp. Trung vị: w_GT/w_model = <b>${m(2).toFixed(2)}</b>, h_GT/h_model = <b>${m(3).toFixed(2)}</b>, lệch tâm ngang ${(m(0)*100).toFixed(1)}%, dọc ${(m(1)*100).toFixed(1)}%, IoU ${m(4).toFixed(2)}.</p>
+   <div class="gtcharts">${hist(C.bias.map(b=>b[2]),{title:'w_GT / w_model',vlines:[[1,'#888']],color:'#20c997'})}${hist(C.bias.map(b=>b[3]),{title:'h_GT / h_model',vlines:[[1,'#888']],color:'#cc5de8'})}</div>`}
+  h+=`<div class="mut">Mặt thiếu nhãn trong GT (${C.missing} đoạn)</div>${thumbs(C.thumbsMiss)}<div class="mut">Box GT không thấy mặt (${C.notface} box)</div>${thumbs(C.thumbsNot)}`;
+  if(C.pairs.length)h+=`<div class="mut">Kiểm tra danh tính</div><div class="gtpairs">${C.pairs.map(p=>`<div><img src="${p.a.img}"><img src="${p.b.img}"><span>${esc(p.v)}<br>${esc(p.kind)}<br>#${p.ida} f${p.a.f} · #${p.idb} f${p.b.f}<br>cos ${p.cos.toFixed(2)}</span></div>`).join('')}</div>`}
+ // báo cáo đầy đủ từng video (giống hệt Đánh giá GT từng file)
+ const keep=GT.issues;h+=`<h4>Báo cáo chi tiết từng video</h4>`+o.L.map(x=>{GT.issues=x.r.issues;const body=renderGT(x.r);return `<details class="btgv" data-bv="${x.i}"><summary><b>${esc(x.p.video.name)}</b> <span class="mut">· ${x.r.st.overview.boxes} box · ${x.r.st.overview.ids} ID · ${x.r.issues.length} nghi vấn</span></summary>${body}</details>`}).join('');GT.issues=keep;
+ return h}
+async function btOpenPair(i,then){ // mở video i của folder (kèm GT, model, kết quả đánh giá) rồi chạy then()
+ if(BT.running)return toast('Đang chạy, hãy chờ hoặc bấm Dừng');const p=BT.pairs[i];if(!p)return;closeModal();
+ try{await btOpen(p,BT.opt||btOptFromUI());const r=p.res;
+  if(r?.gt){GT.res=r.gt;GT.issues=r.gt.issues;GT.cur=-1;renderGTSide()}
+  if(!p.model&&r?.mdSrc?.startsWith('YuNet'))toast('Video này dùng YuNet trong trình duyệt: bấm "Tự chạy YuNet" ở mục Box model để xem lại box',5000);
+  else if(r?.ev){EV.res=r.ev;EV.segs=r.ev.segs;EV.cur=-1;EV.opt=r.ev.opt;renderEvalSide()}
+  drawTimeline();render();if(then)then();else toast(`Đã mở ${p.video.name}: dùng [ ] cho nghi vấn GT, , . cho đoạn model sai. Sửa GT xong hãy Xuất, công cụ không tự lưu video mở từ folder.`,6000)}
+ catch(err){toast('Không mở được: '+(err.message||err),5000)}}
+function btGtWire(o){const out=$('#btGt');if(!out)return;
+ out.onclick=e=>{const tr=e.target.closest('tr.gti');
+  if(tr&&tr.dataset.bv!=null){const pi=+tr.dataset.bv,ii=+tr.dataset.bi;btOpenPair(pi,()=>gotoIssue(ii));return}
+  if(tr){const d=tr.closest('details.btgv');if(d){const ii=+tr.dataset.i;btOpenPair(+d.dataset.bv,()=>gotoIssue(ii))}return}
+  const a=e.target.closest('[data-go],a[data-bv]');if(!a)return;e.preventDefault();
+  const pi=a.dataset.bv!=null?+a.dataset.bv:+a.closest('details.btgv')?.dataset.bv;if(!isFinite(pi))return;
+  btOpenPair(pi,a.dataset.go!=null?()=>goFrame(+a.dataset.go):null)};
+ const k=$('#btgKind'),v=$('#btgVid'),f=()=>{$('#btgIssues').innerHTML=btIssueRows(o.issues.filter(i=>(!k.value||i.kind===k.value)&&(!v.value||i.pi===+v.value)))};if(k)k.onchange=f;if(v)v.onchange=f}
 async function btOpen(p,opt,withModel=true){ // nạp video + GT (+ model) vào công cụ; trả về thông tin định dạng
  if(playing)stopPlay();const info={warn:[]};
  const v=document.createElement('video');v.muted=true;v.playsInline=true;v.preload='auto';v.src=URL.createObjectURL(p.video);
@@ -1278,7 +1364,7 @@ function btTotals(){const R=BT.pairs.map(p=>p.res).filter(r=>r?.ev);if(!R.length
  return {n:R.length,TP,FP,FN,P,R:Rc,F1:2*P*Rc/Math.max(P+Rc,1e-9),perfect:s('perfect'),withAny:s('withAny'),bySize:EV_SIZES.map(([,,n])=>sz.get(n)).filter(Boolean),mIoU:R.reduce((a,r)=>a+r.ev.mIoU*r.ev.TP,0)/Math.max(TP,1)}}
 function btRender(){
  const f3=x=>x==null?'–':x.toFixed(3),pc=x=>x==null?'–':P1(x),T=btTotals();let h='';
- if(T)h+=`<div class="evk">${['P','R'].map(k=>`<div><b>${P1(T[k])}</b><span>${k==='P'?'Precision':'Recall'} (cả folder)</span></div>`).join('')}<div><b>${f3(T.F1)}</b><span>F1</span></div><div><b>${f3(T.mIoU)}</b><span>mIoU</span></div><div><b>${T.TP}</b><span>TP</span></div><div><b>${T.FP}</b><span>FP · box thừa</span></div><div><b>${T.FN}</b><span>FN · mặt sót</span></div><div><b>${P1(T.perfect/Math.max(T.withAny,1))}</b><span>frame đúng hoàn toàn (${T.perfect}/${T.withAny})</span></div></div>
+ if(T)h+=`<h3 class="bth">Đánh giá model so với GT</h3><div class="evk">${['P','R'].map(k=>`<div><b>${P1(T[k])}</b><span>${k==='P'?'Precision':'Recall'} (cả folder)</span></div>`).join('')}<div><b>${f3(T.F1)}</b><span>F1</span></div><div><b>${f3(T.mIoU)}</b><span>mIoU</span></div><div><b>${T.TP}</b><span>TP</span></div><div><b>${T.FP}</b><span>FP · box thừa</span></div><div><b>${T.FN}</b><span>FN · mặt sót</span></div><div><b>${P1(T.perfect/Math.max(T.withAny,1))}</b><span>frame đúng hoàn toàn (${T.perfect}/${T.withAny})</span></div></div>
   <div class="mut">Gộp mọi frame của ${T.n} video (tính trên tổng TP/FP/FN, video dài nặng hơn). Recall theo cỡ mặt: ${T.bySize.map(b=>`${b.n} <b>${P1(b.hit/Math.max(b.tot,1))}</b> (${b.tot})`).join(' · ')}</div>`;
  const rows=BT.pairs.map((p,i)=>({p,i,r:p.res}));
  h+=`<h4>Từng video (${BT.pairs.length})</h4>`+tbl(rows,[['Video',x=>`<a href="#" data-bt="${x.i}">${esc(x.p.video.name)}</a>`],['GT',x=>x.p.gt?esc(x.p.gt.name)+(x.p.gtAlt.length?` <span class="mut">(bỏ ${x.p.gtAlt.map(f=>esc(f.name)).join(', ')})</span>`:''):'<span class="mut">thiếu</span>'],
@@ -1287,16 +1373,9 @@ function btRender(){
   ['Frame đúng',x=>x.r?.ev?P1(x.r.ev.perfect/Math.max(x.r.ev.withAny,1)):'–'],['Nghi vấn GT',x=>x.r?.gt?x.r.gt.issues.length:'–'],
   ['Ghi chú',x=>x.r?(x.r.err?'<b>Lỗi:</b> '+esc(x.r.err):esc([x.r.gtKind&&('GT '+x.r.gtKind+(x.r.gtFmt?' ('+x.r.gtFmt+')':'')),x.r.mdFmt&&('model '+x.r.mdFmt),'nhãn '+x.r.labelName,`${x.r.fps} fps${x.r.fpsSaved?' (đã lưu)':''}`,...x.r.warn].filter(Boolean).join(' · '))):`<span class="mut">${x.p.gt?'chưa chạy':'bỏ qua: không có GT'}</span>`]]);
  if(BT.orphans?.length)h+=`<div class="note">GT không ghép được với video nào: ${BT.orphans.map(esc).join(', ')}</div>`;
- const iss=BT.pairs.flatMap(p=>(p.res?.gt?.issues||[]).map(it=>({...it,v:p.video.name})));
- if(iss.length){const by=new Map();for(const it of iss)by.set(it.kind,(by.get(it.kind)||0)+1);h+=`<h4>Nghi vấn GT theo loại (cả folder)</h4>`+tbl([...by].sort((a,b)=>b[1]-a[1]),[['Loại',x=>esc(x[0])],['Số lần',x=>x[1]]])}
+ const G=btGtPool();if(G)h+=`<h3 class="bth">Đánh giá ground truth cả folder</h3><div id="btGt">${btGtRender(G)}</div>`;
  return h}
-function btWire(){document.querySelectorAll('#btOut a[data-bt]').forEach(a=>a.onclick=async e=>{e.preventDefault();if(BT.running)return toast('Đang chạy, hãy chờ hoặc bấm Dừng');const p=BT.pairs[+a.dataset.bt];
- closeModal();try{await btOpen(p,BT.opt||btOptFromUI());const r=p.res;
-  if(r?.gt){GT.res=r.gt;GT.issues=r.gt.issues;GT.cur=-1;renderGTSide()}
-  if(!p.model&&r?.mdSrc?.startsWith('YuNet'))toast('Video này dùng YuNet trong trình duyệt: bấm "Tự chạy YuNet" ở mục Box model để xem lại box',5000);
-  else if(r?.ev){EV.res=r.ev;EV.segs=r.ev.segs;EV.cur=-1;EV.opt=r.ev.opt;renderEvalSide()}
-  drawTimeline();render();toast(`Đã mở ${p.video.name}: dùng [ ] cho nghi vấn GT, , . cho đoạn model sai. Sửa GT xong hãy Xuất, công cụ không tự lưu video mở từ folder.`,6000)}
- catch(err){toast('Không mở được: '+(err.message||err),5000)}})}
+function btWire(){document.querySelectorAll('#btOut a[data-bt]').forEach(a=>a.onclick=e=>{e.preventDefault();btOpenPair(+a.dataset.bt)});const G=btGtPool();if(G)btGtWire(G)}
 async function btExport(){const P=BT.pairs.filter(p=>p.res);if(!P.length)return;const q=v=>{const t=String(v??'');return /[",\n]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t};
  const csv=(head,rows)=>'﻿'+[head.join(','),...rows.map(r=>r.map(q).join(','))].join('\n');const T=btTotals();
  const sum=csv(['video','gt_file','model_file','fps','frames','gt_boxes','P','R','F1','AP','mIoU','TP','FP','FN','frames_perfect','frames_with_boxes','gt_issues','note'],
@@ -1304,7 +1383,12 @@ async function btExport(){const P=BT.pairs.filter(p=>p.res);if(!P.length)return;
    ...(T?[['TỔNG','','','','','',T.P.toFixed(4),T.R.toFixed(4),T.F1.toFixed(4),'',T.mIoU.toFixed(4),T.TP,T.FP,T.FN,T.perfect,T.withAny,'','']]:[])]);
  const iss=csv(['video','frame','frame_mot','id','group','kind','detail'],P.flatMap(p=>(p.res.gt?.issues||[]).map(it=>[p.res.name,it.f,it.f+1,it.id,it.grp,it.kind,String(it.detail).replace(/<[^>]+>/g,'')])));
  const err=csv(['video','frame','frame_mot','n_gt','n_det','tp','fp','fn','missed_ids'],P.flatMap(p=>(p.res.ev?.per||[]).map(x=>[p.res.name,x.f,x.f+1,x.g,x.d,x.tp,x.fp,x.fn,x.fnId.join(' ')])));
- const files={'folder_summary.csv':sum,'folder_gt_issues.csv':iss,'folder_model_errors.csv':err};
+ const G=btGtPool(),files={'folder_summary.csv':sum,'folder_gt_issues.csv':iss,'folder_model_errors.csv':err};
+ if(G){files['folder_gt_report.html']=`<!DOCTYPE html><meta charset="utf-8"><title>Đánh giá GT cả folder</title><style>${GT_CSS_EXPORT}details{border:1px solid #ddd;border-radius:8px;padding:4px 10px;margin:6px 0}</style><body><h1>Đánh giá GT cả folder (${G.n} video)</h1>${btGtRender(G,true)}</body>`;
+  files['folder_gt_events.csv']=csv(['video','id1','id2','start','end','max_iou','crossed'],G.events.map(e=>[e.v,e.id1,e.id2,e.start,e.end,e.maxIou.toFixed(3),e.crossed]));
+  files['folder_gt_ids.csv']=csv(['video','id','first','last','boxes','segments','longest_gap'],G.L.flatMap(x=>x.r.st.perId.map(d=>[x.p.video.name,d.id,d.first,d.last,d.boxes,d.segments,d.longest])));
+  if(G.B)files['folder_gt_attrs.csv']=csv(['video','frame','id','h','sharpness','brightness','contrast','blur','light'],BT.pairs.filter(p=>p.res?.gt?.scan?.B).flatMap(p=>p.res.gt.scan.B.attrs.map(a=>[p.video.name,a.frame,a.id,a.h,a.sharpness,a.brightness,a.contrast,a.blur,a.light])));
+  files['folder_suggested_params.json']=JSON.stringify({cli:{size:G.suggestSize,max_gap:G.maxGap},tracker:{max_lost:G.maxLost,iou1:G.iou1},geometry:{ar:G.suggestAr},per_video:Object.fromEntries(G.L.map(x=>[x.p.video.name,{size:x.r.st.suggestSize,max_gap:x.r.st.maxGap,max_lost:x.r.st.maxLost,iou1:x.r.st.iou1,ar:x.r.st.suggestAr}]))},null,2)}
  if(window.JSZip){saveFile(await zipBlob(files),'folder_eval.zip')}else for(const [k,v] of Object.entries(files))await saveFile(v,k)}
 function btFolderInfo(){const nv=BT.vids.filter(f=>BT_VID.test(f.name)).length,ng=BT.gts.filter(f=>BT_ANN.test(f.name)).length,nm=BT.mds.filter(f=>BT_ANN.test(f.name)).length;
  $('#btVidN').textContent=nv?`${nv} video`:'chưa chọn';$('#btGtN').textContent=ng?`${ng} file`:'chưa chọn';$('#btMdN').textContent=nm?`${nm} file`:'không bắt buộc';
