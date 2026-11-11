@@ -1206,12 +1206,23 @@ function btBoxRows(txt,name){ // -> {rows,kind,fmt,off,nScore,detector} | {deleg
  return rows.length?{rows,kind:'MOT',fmt:'xywh',off:1,nScore}:null}
 function btPick(J,kind){const names=[...J.vids.keys()],stem=(S.name||'').replace(/\.[^.]+$/,'').toLowerCase();
  const k=names.find(n=>n.toLowerCase()===stem||n.toLowerCase().split('/').pop()===stem)||names.reduce((a,b)=>J.vids.get(b).length>J.vids.get(a).length?b:a);return {rows:J.vids.get(k),kind,nScore:J.nScore}}
+
+function jlJoint(G,MB,opt){ // thử mọi tổ hợp (định dạng, frame đầu) của GT và model, chọn tổ hợp có nhiều box khớp nhau nhất
+ const M=MB.rows.filter(r=>!r.empty),Gs=G.filter(r=>!r.empty);if(!M.length||!Gs.length)return null;
+ const nrm=L=>{const v=L.flatMap(r=>r.b);return v.length>0&&v.every(x=>x>=-0.01&&x<=1.5)},gn=nrm(Gs),mn=nrm(M),F=Object.keys(JL_FMT);
+ const gF=opt.gtFmt==='auto'?F:[opt.gtFmt],gO=opt.gtOff==='auto'?[0,1]:[+opt.gtOff],mF=MB.fmt?[MB.fmt]:opt.mdFmt==='auto'?F:[opt.mdFmt],mO=MB.fmt?[MB.off]:opt.mdOff==='auto'?[0,1]:[+opt.mdOff];
+ const step=Math.max(1,Math.floor(M.length/1500)),Ms=M.filter((_,i)=>i%step===0);let best=null;
+ for(const gf of gF)for(const go of gO){const ref=new Map();for(const r of Gs){const b=jlBox(r.b,gf,gn);if(!(b.w>0&&b.h>0))continue;const f=r.fr-go;if(!ref.has(f))ref.set(f,[]);ref.get(f).push(b)}
+  for(const mf of mF)for(const mo of mO){let hit=0;for(const r of Ms){const L=ref.get(r.fr-mo);if(!L)continue;const b=jlBox(r.b,mf,mn);if(b.w>0&&b.h>0&&L.some(g=>iou(b,g)>=0.5))hit++}
+   const sc=hit/Ms.length;if(!best||sc>best.sc+1e-9||(Math.abs(sc-best.sc)<1e-9&&go===mo&&best.go!==best.mo))best={gf,go,mf,mo,sc}}}
+ return best&&best.sc>=0.2?best:null}
 async function btOpen(p,opt,withModel=true){ // nạp video + GT (+ model) vào công cụ; trả về thông tin định dạng
  if(playing)stopPlay();const info={warn:[]};
  const v=document.createElement('video');v.muted=true;v.playsInline=true;v.preload='auto';v.src=URL.createObjectURL(p.video);
  const ok=await new Promise(r=>{v.onloadeddata=()=>r(true);v.onerror=()=>r(false);setTimeout(()=>r(v.readyState>=2),15000)});if(!ok)throw new Error('trình duyệt không đọc được video (cần MP4 H.264 hoặc WebM)');
  if(!isFinite(v.duration))await new Promise(r=>{v.ondurationchange=()=>{if(isFinite(v.duration))r()};v.currentTime=1e101;setTimeout(r,5000)});
- let fps=opt.fpsMode==='fixed'?opt.fps:await detectFps(v);if(!fps){fps=opt.fps;info.warn.push(`không tự nhận được FPS, dùng ${fps}`)}info.fps=fps;
+ const sv=store.videos[p.video.name],svOk=sv&&sv.w===v.videoWidth&&sv.h===v.videoHeight&&sv.fps;
+ let fps=opt.fpsMode==='fixed'?opt.fps:svOk?sv.fps:await detectFps(v);if(!fps){fps=opt.fps;info.warn.push(`không tự nhận được FPS, dùng ${fps}`)}info.fps=fps;if(opt.fpsMode!=='fixed'&&svOk)info.fpsSaved=true;
  src=makeVideoSource(v);setup(p.video.name,v.videoWidth,v.videoHeight,fps,v.duration,[]);S.batch=true;$('#fname').textContent=p.video.name+' · từ Đánh giá folder (không tự lưu)';
  mdReset(false,1);MD.src='';
  toastMute=true;try{
@@ -1219,18 +1230,22 @@ async function btOpen(p,opt,withModel=true){ // nạp video + GT (+ model) vào 
   if(p.gt){const txt=await p.gt.text(),B=btBoxRows(txt,p.gt.name);info.gtKind=B?.kind||B?.delegate||'?';
    if(!B)info.warn.push('không đọc được file GT');
    else if(B.delegate){importData(txt,true);info.gtKind=B.delegate==='xml'?'XML':'JSON (Mini CVAT)'}
-   else{const g=B.fmt?{fmt:B.fmt,off:B.off,norm:false,how:'MOT'}:jlGuess(B.rows,'gt'),fmt=opt.gtFmt==='auto'?g.fmt:opt.gtFmt,off=opt.gtOff==='auto'?g.off:+opt.gtOff;
-    jlToGT(B.rows,fmt,off,g.norm,true);info.gtFmt=`${fmt}, frame đầu ${off}`;const mx=Math.max(...B.rows.map(r=>r.fr))-off;if(mx>=S.n)info.warn.push(`GT có frame ${mx} nhưng video chỉ có ${S.n} frame: kiểm tra FPS`)}}
+   else{let g=B.fmt?{fmt:B.fmt,off:B.off,norm:false,how:'MOT'}:jlGuess(B.rows,'gt');
+    if(!B.fmt&&p.model&&(opt.gtFmt==='auto'||opt.gtOff==='auto')){const MB=btBoxRows(await p.model.text(),p.model.name);if(MB?.rows){const J=jlJoint(B.rows,MB,opt);if(J){ // GT và model cùng lệch 1 frame thì khớp như nhau: giữ frame đầu GT theo quy tắc cũ, chỉ lấy độ lệch model so với GT
+     const go=opt.gtOff==='auto'?g.off:+opt.gtOff,d=J.mo-J.go,mo=MB.fmt?MB.off:(go+d===0||go+d===1)?go+d:J.mo;g={...g,fmt:J.gf,off:(MB.fmt||go+d===0||go+d===1)&&!MB.fmt?go:J.go,how:'so với kết quả model'};info.mdForced={fmt:J.mf,off:MB.fmt?MB.off:mo,sc:J.sc}}}}
+    const fmt=opt.gtFmt==='auto'?g.fmt:opt.gtFmt,off=opt.gtOff==='auto'?g.off:+opt.gtOff;
+    jlToGT(B.rows,fmt,off,g.norm,true);info.gtFmt=`${fmt}, frame đầu ${off}`+(info.mdForced?' (đoán cùng model)':'');const mx=Math.max(...B.rows.map(r=>r.fr))-off;if(mx>=S.n)info.warn.push(`GT có frame ${mx} nhưng video chỉ có ${S.n} frame: kiểm tra FPS`)}}
   else info.warn.push('không có GT');
   if(withModel)await btLoadModel(p,opt,info);
  }finally{toastMute=false}
+ const used=new Set(S.tracks.map(t=>t.label)),fl=S.labels.find(l=>used.has(l.id)&&/face|mặt/i.test(l.name));info.label=fl?fl.id:0;info.labelName=fl?fl.name:'mọi nhãn';
  renderLabels();changed(false);updModelSide();return info}
 async function btLoadModel(p,opt,info){ // nạp file kết quả model (ghép theo GT đang mở)
  toastMute=true;try{
   if(p.model){const txt=await p.model.text(),B=btBoxRows(txt,p.model.name);info.mdKind=B?.kind||B?.delegate||'?';
    if(!B||B.delegate==='json')info.warn.push('không đọc được file kết quả model');
    else if(B.delegate==='xml'){loadModelFile(txt,p.model.name);info.mdKind='XML'}
-   else{const g=B.fmt?{fmt:B.fmt,off:B.off,norm:false}:jlGuess(B.rows,'model'),fmt=opt.mdFmt==='auto'?g.fmt:opt.mdFmt,off=opt.mdOff==='auto'?g.off:+opt.mdOff;
+   else{let g=B.fmt?{fmt:B.fmt,off:B.off,norm:false}:jlGuess(B.rows,'model');if(!B.fmt&&info.mdForced)g={...g,fmt:info.mdForced.fmt,off:info.mdForced.off,sc:info.mdForced.sc};const fmt=opt.mdFmt==='auto'?g.fmt:opt.mdFmt,off=opt.mdOff==='auto'?g.off:+opt.mdOff;
     jlToModel(B.rows,fmt,off,g.norm,p.model.name+(B.detector?` · ${B.detector}`:''),!B.nScore);info.mdFmt=`${fmt}, frame đầu ${off}`+(g.sc!=null?` (khớp GT ${P1(g.sc)})`:'');if(!B.nScore)info.warn.push('kết quả model không có score: AP không có ý nghĩa')}}
  }finally{toastMute=false}
  updModelSide();render();return info}
@@ -1247,13 +1262,13 @@ async function btRun(){
  const prog=(i,t,p)=>{const el=$('#btProgTxt');if(el)el.textContent=`Video ${i+1}/${P.length}: ${t}`;const b=$('#btProg i');if(b)b.style.width=((i+(p||0))/P.length*100).toFixed(1)+'%'};
  try{for(let i=0;i<P.length;i++){const p=P[i];if(BT.cancel)break;const r={name:p.video.name,gtFile:p.gt.name,mdFile:p.model?.name||'',warn:[]};p.res=r;
    try{prog(i,'đang mở',0);const info=await btOpen(p,o,false);Object.assign(r,{fps:info.fps,n:S.n,gtKind:info.gtKind,gtFmt:info.gtFmt||'',mdKind:info.mdKind||'',mdFmt:info.mdFmt||''});r.warn.push(...info.warn);
-    const D=gtData(0);r.gtBoxes=D.rows.length;r.gtIds=D.T.size;
-    if(D.rows.length){const go=btGtOpt(o);const st=stats(D),iss=labelChecks(D);let scan={issues:[],B:null,C:null};
+    r.label=info.label;r.labelName=info.labelName;r.fpsSaved=info.fpsSaved;const D=gtData(info.label);r.gtBoxes=D.rows.length;r.gtIds=D.T.size;
+    if(D.rows.length){const go={...btGtOpt(o),label:info.label};const st=stats(D),iss=labelChecks(D);let scan={issues:[],B:null,C:null};
      if(go.B||go.C)scan=await scanVideo(D,go,(t,q)=>prog(i,'Đánh giá GT: '+t,q));
      r.gt={opt:go,st,scan,issues:collapse([...iss,...scan.issues]),when:new Date().toLocaleString()}}
     if(p.model){await btLoadModel(p,o,info);r.mdKind=info.mdKind||'';r.mdFmt=info.mdFmt||'';r.warn=[...new Set([...r.warn,...info.warn])]}
     else if(!(o.C&&MD.dets.size)&&o.yunet)await btRunYunet(o.yStride,(t,q)=>prog(i,t,q));
-    if(MD.dets.size&&D.rows.length){r.ev=evalModel({label:0,thr:o.thr,iou:o.iou});r.mdSrc=MD.src}else if(!MD.dets.size)r.warn.push('không có kết quả model')}
+    if(MD.dets.size&&D.rows.length){r.ev=evalModel({label:info.label,thr:o.thr,iou:o.iou});r.mdSrc=MD.src}else if(!MD.dets.size)r.warn.push('không có kết quả model')}
    catch(e){r.err=String(e.message||e);if(/hủy/.test(r.err))break}
    const out=$('#btOut');if(out){out.innerHTML=btRender();btWire()}}}
  finally{BT.running=false;const b=$('#btRun');if(b)b.disabled=false;const s2=$('#btStop');if(s2)s2.hidden=true;const t=$('#btProgTxt');if(t)t.textContent=BT.cancel?'Đã dừng':'Xong';const pb=$('#btProg i');if(pb&&!BT.cancel)pb.style.width='100%';
@@ -1270,7 +1285,7 @@ function btRender(){
   ['Kết quả model',x=>x.p.model?esc(x.p.model.name):x.r?.mdSrc?esc(x.r.mdSrc):'<span class="mut">–</span>'],['Frame',x=>x.r?.n??''],['Box GT',x=>x.r?.gtBoxes??''],
   ['P',x=>pc(x.r?.ev?.P)],['R',x=>x.r?.ev?'<b>'+P1(x.r.ev.R)+'</b>':'–'],['F1',x=>f3(x.r?.ev?.F1)],['AP',x=>f3(x.r?.ev?.AP)],['FP',x=>x.r?.ev?.FP??'–'],['FN',x=>x.r?.ev?.FN??'–'],
   ['Frame đúng',x=>x.r?.ev?P1(x.r.ev.perfect/Math.max(x.r.ev.withAny,1)):'–'],['Nghi vấn GT',x=>x.r?.gt?x.r.gt.issues.length:'–'],
-  ['Ghi chú',x=>x.r?(x.r.err?'<b>Lỗi:</b> '+esc(x.r.err):esc([x.r.gtKind&&('GT '+x.r.gtKind+(x.r.gtFmt?' ('+x.r.gtFmt+')':'')),x.r.mdFmt&&('model '+x.r.mdFmt),`${x.r.fps} fps`,...x.r.warn].filter(Boolean).join(' · '))):`<span class="mut">${x.p.gt?'chưa chạy':'bỏ qua: không có GT'}</span>`]]);
+  ['Ghi chú',x=>x.r?(x.r.err?'<b>Lỗi:</b> '+esc(x.r.err):esc([x.r.gtKind&&('GT '+x.r.gtKind+(x.r.gtFmt?' ('+x.r.gtFmt+')':'')),x.r.mdFmt&&('model '+x.r.mdFmt),'nhãn '+x.r.labelName,`${x.r.fps} fps${x.r.fpsSaved?' (đã lưu)':''}`,...x.r.warn].filter(Boolean).join(' · '))):`<span class="mut">${x.p.gt?'chưa chạy':'bỏ qua: không có GT'}</span>`]]);
  if(BT.orphans?.length)h+=`<div class="note">GT không ghép được với video nào: ${BT.orphans.map(esc).join(', ')}</div>`;
  const iss=BT.pairs.flatMap(p=>(p.res?.gt?.issues||[]).map(it=>({...it,v:p.video.name})));
  if(iss.length){const by=new Map();for(const it of iss)by.set(it.kind,(by.get(it.kind)||0)+1);h+=`<h4>Nghi vấn GT theo loại (cả folder)</h4>`+tbl([...by].sort((a,b)=>b[1]-a[1]),[['Loại',x=>esc(x[0])],['Số lần',x=>x[1]]])}
@@ -1296,7 +1311,7 @@ function btFolderInfo(){const nv=BT.vids.filter(f=>BT_VID.test(f.name)).length,n
  btPair();const P=BT.pairs,ok=P.filter(p=>p.gt).length,wm=P.filter(p=>p.model).length;
  $('#btPairs').innerHTML=P.length?`<b>${ok}/${P.length}</b> video có GT${BT.mds.length?`, <b>${wm}</b> có kết quả model`:''}.`+(P.some(p=>!p.gt)?` Thiếu GT: ${P.filter(p=>!p.gt).map(p=>esc(p.video.name)).slice(0,8).join(', ')}${P.filter(p=>!p.gt).length>8?'…':''}.`:'')+(BT.orphans.length?` GT thừa: ${BT.orphans.slice(0,8).map(esc).join(', ')}.`:''):'';
  $('#btRun').disabled=!ok||BT.running;$('#btOut').innerHTML=btRender();btWire()}
-function showBatch(){if(playing)togglePlay();const o=BT.opt||{prefer:'json',fpsMode:'auto',fps:25,gtFmt:'auto',gtOff:'auto',mdFmt:'auto',mdOff:'auto',thr:0.5,iou:0.5,B:false,C:false,scan:'auto',yunet:false,yStride:5};
+function showBatch(){if(playing)togglePlay();const o=BT.opt||{prefer:'json',fpsMode:'auto',fps:25,gtFmt:'auto',gtOff:'auto',mdFmt:'auto',mdOff:'auto',thr:MD.thr,iou:0.5,B:false,C:false,scan:'auto',yunet:false,yStride:5};
  const sel=(id,opts,v)=>`<select class="btn" id="${id}">${opts.map(([k,t])=>`<option value="${k}"${String(k)===String(v)?' selected':''}>${t}</option>`).join('')}</select>`;
  const FM=[['auto','Tự đoán'],['xywh','[x,y,w,h]'],['xyxy','[x1,y1,x2,y2]'],['cxcywh','[cx,cy,w,h]']],FO=[['auto','Tự đoán'],['0','0'],['1','1']];
  openModal('Đánh giá cả folder',`<div class="gtcfg">
