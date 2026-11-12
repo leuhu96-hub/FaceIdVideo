@@ -147,6 +147,7 @@ tr.gA td:first-child{border-left:3px solid #fcc419}tr.gQ td:first-child{border-l
   <button class="btn icon" id="undoBtn" title="Hoàn tác (Ctrl+Z)">↶</button>
   <button class="btn icon" id="redoBtn" title="Làm lại (Ctrl+Y)">↷</button>
   <label class="chk"><input type="checkbox" id="showTags" checked>Tên nhãn</label>
+  <label class="chk" title="Hiện 5 landmark của mặt (mắt xanh, mũi vàng, miệng hồng) có từ Tự gán nhãn"><input type="checkbox" id="showLm" checked>Landmark</label>
   <span class="sep"></span>
   <button class="btn" id="importBtn">Nhập</button>
   <button class="btn" id="exportBtn">Xuất</button>
@@ -301,6 +302,16 @@ function stateAt(t,f){
  const b=t.kf[nk];if(b.outside||b.pts.length!==a.pts.length)return {pts:a.pts,key:false};
  const r=(f-p)/(nk-p);return {pts:a.pts.map((q,i)=>[q[0]+(b.pts[i][0]-q[0])*r,q[1]+(b.pts[i][1]-q[1])*r]),key:false};
 }
+/* landmark 5 điểm (mắt trái, mắt phải, mũi, khoé miệng trái, khoé miệng phải). Lưu ở keyframe dạng toạ độ tương đối trong box (kf.lm, 10 số 0..1)
+   nên sửa box thì landmark đi theo; giữa các keyframe có landmark thì nội suy. Trả về 10 số toạ độ ảnh, hoặc null. */
+function lmAt(t,f){if(t.type!=='rect')return null;const s=stateAt(t,f);if(!s)return null;let p=null,n=null;
+ for(const k of keys(t)){const q=t.kf[k];if(k<=f){if(q.outside)p=null;else if(q.lm)p=k}else{if(q.outside)break;if(q.lm){n=k;break}}}
+ if(p===null&&n===null)return null;const A=t.kf[p??n].lm,B=t.kf[n??p].lm,r=p!==null&&n!==null&&n!==p?(f-p)/(n-p):0;
+ const x0=Math.min(s.pts[0][0],s.pts[1][0]),y0=Math.min(s.pts[0][1],s.pts[1][1]),w=Math.abs(s.pts[1][0]-s.pts[0][0]),h=Math.abs(s.pts[1][1]-s.pts[0][1]);
+ return A.map((v,i)=>{const u=v+(B[i]-v)*r;return i%2?y0+u*h:x0+u*w})}
+const LM_COL=['#4dabf7','#4dabf7','#ffd43b','#f783ac','#f783ac'];
+function drawLm(t){const L=lmAt(t,S.frame);if(!L)return;const s=stateAt(t,S.frame),bw=Math.abs(s.pts[1][0]-s.pts[0][0])*view.s,rad=clamp(bw/18,2.2,5);
+ ctx.save();for(let j=0;j<5;j++){const [x,y]=toS([L[2*j],L[2*j+1]]);ctx.beginPath();ctx.arc(x,y,rad,0,7);ctx.fillStyle=LM_COL[j];ctx.fill();ctx.lineWidth=1;ctx.strokeStyle='rgba(0,0,0,.6)';ctx.stroke()}ctx.restore()}
 function spans(t){const ks=keys(t),out=[];let st=null;for(const k of ks){const o=t.kf[k].outside;if(!o&&st===null)st=k;else if(o&&st!==null){out.push([st,k]);st=null}}if(st!==null)out.push([st,S.n]);return out}
 function ensureKey(t,f){if(!t.kf[f]||t.kf[f].outside){const s=stateAt(t,f);t.kf[f]={pts:clone(s.pts),outside:false}}return t.kf[f]}
 function visible(){const out=[];for(const t of S.tracks){if(t.hidden)continue;const s=stateAt(t,S.frame);if(s)out.push({t,pts:s.pts,key:s.key})}return out}
@@ -334,6 +345,7 @@ function render(){
  const vis=visible();let sv=null;
  for(const v of vis){if(v.t.id===sel)sv=v;else drawShape(v,false)}
  if(sv)drawShape(sv,true);
+ if($('#showLm').checked)for(const v of vis)drawLm(v.t);
  if(draft)drawDraft();
  drawModel();if(MD.dets.size)updModelSide();pvDraw();
  if(GT.hl&&GT.hl.f===S.frame){const b=GT.hl.box,[a0,b0]=toS([b.x,b.y]),[a1,b1]=toS([b.x+b.w,b.y+b.h]);ctx.save();ctx.setLineDash([6,4]);ctx.lineWidth=2.5;ctx.strokeStyle='#ff922b';ctx.strokeRect(a0,b0,a1-a0,b1-b0);
@@ -633,7 +645,7 @@ addEventListener('keydown',e=>{
 const pad=n=>String(n).padStart(6,'0');
 function exportNative(){return JSON.stringify({format:'mini-cvat-video',version:1,video:{name:S.name,width:S.w,height:S.h,fps:S.fps,frames:S.n},targets:[...(S.targets||[])],
  labels:S.labels.map(l=>({name:l.name,color:l.color})),
- tracks:S.tracks.map(t=>({id:t.id,person:pid(t),label:lname(t.label),type:t.type,...(t.a?{attr:t.a}:{}),keyframes:keys(t).map(k=>({frame:k,outside:t.kf[k].outside,points:t.kf[k].pts.flat(),...(t.kf[k].a?{attr:t.kf[k].a}:{})}))}))},null,1)}
+ tracks:S.tracks.map(t=>({id:t.id,person:pid(t),label:lname(t.label),type:t.type,...(t.a?{attr:t.a}:{}),keyframes:keys(t).map(k=>({frame:k,outside:t.kf[k].outside,points:t.kf[k].pts.flat(),...(t.kf[k].a?{attr:t.kf[k].a}:{}),...(t.kf[k].lm?{lm:t.kf[k].lm}:{})}))}))},null,1)}
 function exportCVAT(){
  const x=s=>esc(s);const L=[];L.push('<?xml version="1.0" encoding="utf-8"?>','<annotations>','  <version>1.1</version>','  <meta>','    <task>',
   `      <name>${x(S.name)}</name>`,`      <size>${S.n}</size>`,'      <mode>interpolation</mode>',`      <start_frame>0</start_frame>`,`      <stop_frame>${S.n-1}</stop_frame>`,'      <labels>');
@@ -738,7 +750,7 @@ function importData(txt,replace){
   if(Array.isArray(d.targets))S.targets=[...new Set([...(replace?[]:S.targets||[]),...d.targets.map(Number).filter(x=>x>0)])];
   for(const tr of d.tracks||[]){const t={id:S.nextId++,type:tr.type,label:labelId(tr.label),kf:{},hidden:false,locked:false};
    if(tr.person!=null&&+tr.person>0&&+tr.person!==t.id)t.person=+tr.person;if(tr.attr&&typeof tr.attr==='object')t.a=tr.attr;
-   for(const k of tr.keyframes||[]){const P=[];for(let i=0;i+1<k.points.length;i+=2)P.push([k.points[i],k.points[i+1]]);t.kf[k.frame]={pts:P,outside:!!k.outside};if(k.attr&&typeof k.attr==='object')t.kf[k.frame].a=k.attr}
+   for(const k of tr.keyframes||[]){const P=[];for(let i=0;i+1<k.points.length;i+=2)P.push([k.points[i],k.points[i+1]]);t.kf[k.frame]={pts:P,outside:!!k.outside};if(k.attr&&typeof k.attr==='object')t.kf[k.frame].a=k.attr;if(Array.isArray(k.lm)&&k.lm.length===10&&k.lm.every(Number.isFinite))t.kf[k.frame].lm=k.lm}
    if(Object.keys(t.kf).length)out.push(t)}}
  if(!out.length){toast('Không tìm thấy đối tượng nào');renderLabels();return false}
  pushUndo();S.tracks=replace?out:S.tracks.concat(out);sel=null;renderLabels();changed();toast(`Đã nhập ${out.length} track`);return true}
@@ -1863,8 +1875,8 @@ function pvIn(x){ // đọc thuộc tính từ một object JSONL -> {a, person}
  const p=x.person_id??x.person;return {a:Object.keys(a).length?a:null,person:p!=null&&isFinite(+p)&&+p>0?Math.round(+p):null}}
 function exportPVJsonl(){ // mỗi dòng một frame; dòng đầu là meta (người được chọn ở mức video)
  const stem=(S.name||'video').replace(/\.[^.]+$/,''),F=new Map();
- for(const t of S.tracks){if(t.type==='points')continue;const nm=lname(t.label);for(const r of pvRows(t)){if(!F.has(r.f))F.set(r.f,[]);
-  F.get(r.f).push({track_id:t.id,person_id:r.p,cls:nm,label:nm,bbox:[r2(r.x),r2(r.y),r2(r.w),r2(r.h)],blur:r.a.blur,occlusion:r.a.occ,pose:r.a.pose,indirect:!!r.a.indirect,truncated:!!r.a.trunc,identifiable:PV_IDENT[r.a.ident]||'yes',ignore:!!r.a.ignore})}}
+ for(const t of S.tracks){if(t.type==='points')continue;const nm=lname(t.label);for(const r of pvRows(t)){if(!F.has(r.f))F.set(r.f,[]);const lm=lmAt(t,r.f);
+  F.get(r.f).push({track_id:t.id,person_id:r.p,cls:nm,label:nm,bbox:[r2(r.x),r2(r.y),r2(r.w),r2(r.h)],blur:r.a.blur,occlusion:r.a.occ,pose:r.a.pose,indirect:!!r.a.indirect,truncated:!!r.a.trunc,identifiable:PV_IDENT[r.a.ident]||'yes',ignore:!!r.a.ignore,...(lm?{landmarks:[0,1,2,3,4].map(j=>[r2(lm[2*j]),r2(lm[2*j+1])])}:{})})}}
  const L=[JSON.stringify({meta:{format:'mini-cvat-privacy-gt',version:1,video:S.name,width:S.w,height:S.h,fps:S.fps,frame_count:S.n,bbox:'xywh',frame_base:0,target_ids:[...(S.targets||[])]}})];
  for(let f=0;f<S.n;f++)L.push(JSON.stringify({sample_id:`${stem}/frame-${pad(f)}`,object:(F.get(f)||[]).sort((a,b)=>a.track_id-b.track_id)}));
  return L.join('\n')}
@@ -2040,7 +2052,8 @@ function plAttrs(t,opt){ // thuộc tính tự điền cho từng box của trac
  return raw.map((_,i)=>({...PV_DEF,blur:maj('blur',i),pose:maj('pose',i),trunc:raw[i].trunc,ignore:maj('ignore',i)}))}
 function plKeys(d,stride){ // chỉ giữ keyframe khi nội suy tuyến tính lệch quá ngưỡng
  const fits=(i,j)=>{const a=d[i],b=d[j];for(let m=i+1;m<j;m++){const c=d[m],r=(c.f-a.f)/(b.f-a.f),tol=Math.max(1.5,0.06*Math.min(c.w,c.h));
-   const x=a.x+(b.x-a.x)*r,y=a.y+(b.y-a.y)*r,w=a.w+(b.w-a.w)*r,h=a.h+(b.h-a.h)*r;if(Math.abs(x-c.x)>tol||Math.abs(y-c.y)>tol||Math.abs(x+w-c.x-c.w)>tol||Math.abs(y+h-c.y-c.h)>tol)return false}return true};
+   const x=a.x+(b.x-a.x)*r,y=a.y+(b.y-a.y)*r,w=a.w+(b.w-a.w)*r,h=a.h+(b.h-a.h)*r;if(Math.abs(x-c.x)>tol||Math.abs(y-c.y)>tol||Math.abs(x+w-c.x-c.w)>tol||Math.abs(y+h-c.y-c.h)>tol)return false;
+   if(a.lm&&b.lm&&c.lm){const lt=Math.max(1.5,0.05*Math.min(c.w,c.h));for(let k=0;k<10;k++){const ua=k%2?(a.lm[k]-a.y)/a.h:(a.lm[k]-a.x)/a.w,ub=k%2?(b.lm[k]-b.y)/b.h:(b.lm[k]-b.x)/b.w,u=ua+(ub-ua)*r,p=k%2?y+u*h:x+u*w;if(Math.abs(p-c.lm[k])>lt)return false}}}return true};
  const K=[0];let i=0;while(i<d.length-1){let j=i+1;while(j+1<d.length&&d[j+1].f-d[i].f<=30*stride&&fits(i,j+1))j++;K.push(j);i=j}return K}
 /* ---------- THEO DẤU ẢNH (optical flow Lucas–Kanade) ----------
    Thay nội suy thẳng ở chỗ bộ dò mất mặt: chạy xuôi từ box trước và ngược từ box sau, trộn theo khoảng cách (hai chiều lệch nhau thì giữ nội suy).
@@ -2153,7 +2166,7 @@ function plBuild(R,opt){
   for(let p=0;p+1<B.length;p++)for(const j of plKeys(d.slice(B[p],B[p+1]),opt.stride))K.add(B[p]+j); // mỗi đoạn nội suy riêng, không nội suy xuyên khoảng trống ReID
   for(let i=1;i<d.length;i++)if(JSON.stringify(A[i])!==JSON.stringify(A[i-1])){chg.add(i);K.add(i)}
   const tr={id,type:'rect',label:opt.label,kf:{},hidden:false,locked:false};
-  for(const i of [...K].sort((a,b)=>a-b)){const o=d[i];tr.kf[o.f]={pts:[[r2(o.x),r2(o.y)],[r2(o.x+o.w),r2(o.y+o.h)]],outside:false};if(chg.has(i))tr.kf[o.f].a=A[i]}
+  for(const i of [...K].sort((a,b)=>a-b)){const o=d[i];tr.kf[o.f]={pts:[[r2(o.x),r2(o.y)],[r2(o.x+o.w),r2(o.y+o.h)]],outside:false};if(o.lm&&o.lm.length===10)tr.kf[o.f].lm=o.lm.map((v,k)=>Math.round((k%2?(v-o.y)/o.h:(v-o.x)/o.w)*1000)/1000);if(chg.has(i))tr.kf[o.f].a=A[i]}
   for(let p=0;p+1<B.length;p++){const e=B[p+1]-1,fin=p+2===B.length,end=Math.min(d[e].f+(d[e].flow?1:opt.stride),S.n),lim=fin?S.n:d[e+1].f;
    if(end<lim)tr.kf[end]={pts:clone(tr.kf[d[e].f].pts),outside:true};nBox+=Math.min(end,lim)-d[B[p]].f}
   out.push(tr);if(A.every(a=>a.ignore))nIgn++;
@@ -2318,7 +2331,7 @@ $('#fpsIn').onchange=e=>{const v=+e.target.value;if(!src||!(v>0)){e.target.value
 document.querySelectorAll('#boxEd input').forEach(i=>i.onchange=()=>{const g=k=>+$('#boxEd input[data-k="'+k+'"]').value;setBox(g('x'),g('y'),g('w'),g('h'))});
 $('#undoBtn').onclick=undo;$('#redoBtn').onclick=redo;
 $('#fitBtn').onclick=fit;$('#zoomIn').onclick=()=>zoomAt([W/2,H/2],1.25);$('#zoomOut').onclick=()=>zoomAt([W/2,H/2],0.8);
-$('#showTags').onchange=render;$('#curLabelSel').onchange=e=>setCurLabel(+e.target.value,false);
+$('#showTags').onchange=render;$('#showLm').checked=localStorage.getItem('mcvat.showLm')!=='0';$('#showLm').onchange=()=>{try{localStorage.setItem('mcvat.showLm',$('#showLm').checked?'1':'0')}catch(e){}render()};$('#curLabelSel').onchange=e=>setCurLabel(+e.target.value,false);
 $('#exportBtn').onclick=showExport;$('#importBtn').onclick=showImport;$('#helpBtn').onclick=showHelp;
 $('#sideBtn').onclick=()=>$('#side').classList.toggle('open');
 $('#addLabelForm').onsubmit=e=>{e.preventDefault();const v=$('#newLabel').value.trim();if(!v)return;if(S.labels.some(l=>l.name===v))return toast('Nhãn đã tồn tại');
