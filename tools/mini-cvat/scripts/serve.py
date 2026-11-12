@@ -22,19 +22,24 @@ class H(SimpleHTTPRequestHandler):
 
     def end_headers(self):
         self.send_header('Cache-Control', 'no-cache')
+        # cho phép SharedArrayBuffer (onnxruntime-web chạy WASM đa luồng); 'credentialless' vẫn cho tải thư viện từ CDN
+        self.send_header('Cross-Origin-Opener-Policy', 'same-origin')
+        self.send_header('Cross-Origin-Embedder-Policy', 'credentialless')
         super().end_headers()
 
     def do_GET(self):
         u = urlparse(self.path)
-        if u.path == '/api/ensure-model':
+        if u.path in ('/api/ensure-model', '/api/ensure-ort'):
             name = (parse_qs(u.query).get('name') or [''])[0]
             try:
                 with LOCK:
-                    get_models.ensure(name, log=lambda m: print('[models]', m, flush=True))
+                    lg = lambda m: print('[models]', m, flush=True)  # noqa: E731
+                    get_models.ensure_ort(log=lg) if u.path == '/api/ensure-ort' else get_models.ensure(name, log=lg)
                 out, code = {'ok': True}, 200
             except Exception as e:  # noqa
                 print('[models] lỗi:', e, flush=True)
-                out, code = {'ok': False, 'error': 'Không tải được model %s: %s. Kiểm tra mạng hoặc chạy python scripts/get_models.py' % (name, e)}, 200
+                what = 'onnxruntime-web' if u.path == '/api/ensure-ort' else 'model ' + name
+                out, code = {'ok': False, 'error': 'Không tải được %s: %s' % (what, e)}, 200
             b = json.dumps(out).encode()
             self.send_response(code)
             self.send_header('Content-Type', 'application/json')

@@ -27,6 +27,7 @@ Mở thẳng `index.html` (double-click) vẫn chạy được phần gán nhãn
 | `lib/seqreader.js` | Tách gói MP4/WebM và giải mã tuần tự bằng WebCodecs cho Tự gán nhãn |
 | `lib/det_core.js`, `lib/det_worker.js` | Lõi + Web Worker của **Tự gán nhãn**: SCRFD, YuNet, ArcFace; nhiều worker chạy song song |
 | `models/` | SCRFD / ArcFace `.onnx` (tự tải, không đưa vào git) |
+| `lib/ort/` | onnxruntime-web (tự tải từ npm, không đưa vào git) |
 | `sample/` | Video thử `c1.webm` (2 người, có cài sẵn lỗi GT) và nhãn `c1_gt.json` |
 | `scripts/analyze_gt.py` | Phân tích GT đầy đủ, xuất báo cáo HTML + CSV + tham số gợi ý |
 | `scripts/eval_face_postproc.py` | Chạy YuNet, so sánh 9 biến thể post-processing với GT |
@@ -116,7 +117,8 @@ Nút **Tự gán nhãn** → **Chạy**. Mọi thứ chạy trong trình duyệt
    | Lựa chọn | Dùng khi | Cần tải |
    | --- | --- | --- |
    | SCRFD-500M + YuNet (mặc định) | cân bằng tốc độ và độ sót; hai bộ dò khác nhau nên GT ít nghiêng về một mô hình | 2,5 MB |
-   | SCRFD-10G + YuNet | cần ít sót nhất (mặt nhỏ, mờ, nghiêng); chậm hơn khoảng 10 lần | 17 MB |
+   | SCRFD-10G phân tầng + SCRFD-500M + YuNet | gần bằng SCRFD-10G mà nhanh hơn khoảng 2 lần (xem dưới) | 17 MB |
+   | SCRFD-10G + YuNet | cần ít sót nhất; chậm hơn SCRFD-500M khoảng 10 lần | 17 MB |
    | SCRFD-10G / SCRFD-500M | chỉ một bộ dò SCRFD | như trên |
    | YuNet | không muốn tải gì | 0 |
 
@@ -131,6 +133,10 @@ Nút **Tự gán nhãn** → **Chạy**. Mọi thứ chạy trong trình duyệt
 Chạy lại **Tự gán nhãn** trên cùng video với cùng bộ dò / cỡ vào / bước quét mà chỉ đổi ngưỡng thì máy dùng lại kết quả dò lần trước, chỉ mất vài giây.
 
 **Lọc chặt box lạ** (bật mặc định, ngưỡng mặc định điểm thấp 0,4 / điểm chắc 0,65): loại box có tỉ lệ khung phi lý, landmark ngoài box hoặc sai thứ tự mắt-mũi-miệng, box mà khi chạy hai bộ dò chỉ một bộ thấy và điểm thấp, và track không có ít nhất 2 box điểm cao. Báo cáo ghi số box và track đã loại. Nếu thấy mất mặt thật (mặt rất nhỏ, mờ), tắt lọc chặt hoặc hạ điểm thấp xuống 0,3, bù lại sẽ có thêm track rác cần xoá bằng `Del`.
+
+**Phân tầng SCRFD-10G**: bộ dò nhẹ (SCRFD-500M + YuNet) chạy mọi frame; SCRFD-10G chạy cả khung khoảng 1/3 giây một frame để tìm mặt mới, và chạy trên vùng cắt nhỏ quanh mặt (phóng to cho mặt ~64 px, rẻ hơn cả khung khoảng 10–15 lần) ở ±2 frame quanh đầu / cuối track và trong chỗ hổng dài. Mặt chỉ SCRFD-10G thấy được nối qua các frame giữa bằng theo dấu ảnh. Thử trên video 1080p có 25 mặt nhỏ ~20 px, lấy kết quả SCRFD-10G + YuNet chạy mọi frame làm mốc: SCRFD-10G mọi frame 403 s; phân tầng 206 s, bắt 96,7% số mặt của mốc ở ngưỡng mặc định; SCRFD-500M + YuNet 48 s, 83,4% (cả hai lên 100% sau khi dò ngưỡng). Video ít mặt, mặt to thì phần SCRFD-10G còn ít hơn.
+
+**Bộ chạy model**: mặc định "tự chọn". Lần đầu, `serve.py` tải onnxruntime-web 1.20.1 từ npm vào `lib/ort/` (hoặc chạy `python scripts/get_models.py --ort`), rồi SCRFD và ArcFace chạy bằng onnxruntime-web: WebGPU nếu trình duyệt có, không thì WASM đa luồng (`serve.py` bật COOP/COEP để có đa luồng). Ở frame đầu, mỗi worker chạy cả onnxruntime-web và OpenCV.js rồi so kết quả (box lệch IoU < 0,9 hoặc điểm lệch > 0,05, ArcFace cos < 0,99 là lệch); lệch, lỗi, hay chưa tải được thì dùng OpenCV.js. Báo cáo ghi bộ chạy đang dùng và lý do. Phần này **chưa được thử với onnxruntime-web thật** (môi trường phát triển không tải được gói npm); mới thử bằng bản giả cùng API, gồm nhánh dùng được, nhánh lệch và nhánh hỏng gói. Chọn "OpenCV.js" để tắt hẳn.
 
 **Theo dấu ảnh** (bật mặc định): chỗ bộ dò mất mặt (tối đa 3 giây) được lấp bằng optical flow Lucas–Kanade chạy xuôi từ box trước và ngược từ box sau, trộn theo khoảng cách; hai chiều lệch nhau hoặc không bám được thì giữ nội suy và báo. Hai đầu mỗi đoạn track được kéo dài tối đa 1 giây (không qua chuyển cảnh, dừng khi mất điểm bám hoặc chạm box track khác), để bắt mặt lúc đang quay đi, mờ, bị che. Thử trên video lia máy theo đường cong, bỏ box của bộ dò ở 8 frame: IoU so với box thật tăng từ 0,58–0,63 (nội suy thẳng) lên 0,90; bỏ box ở đoạn dài: trước không có box nào trong 19 frame, nay phủ đủ 19 frame với IoU 0,91. Các đoạn lấp / kéo dài từ 0,2 giây trở lên được đưa vào hàng đợi để xem.
 

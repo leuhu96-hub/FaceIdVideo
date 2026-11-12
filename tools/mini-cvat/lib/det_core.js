@@ -119,21 +119,43 @@
       for (let i = 0; i < out.rows; i++) { const r = out.data32F.subarray(i * 15, i * 15 + 15); res.push({ x: r[0], y: r[1], w: r[2], h: r[3], s: r[14], lm: Array.from(r.subarray(4, 14)) }); }
       out.delete(); return res;
     }
-    function runSc(stem, bgr, thr, sz) {
+    /* --- onnxruntime-web (tuỳ chọn): opts.ort = {lib: ort, ep: 'webgpu'|'wasm'}. Lần đầu mỗi loại việc chạy cả hai bộ chạy
+       và so kết quả; lệch hay lỗi thì tắt onnxruntime-web, dùng OpenCV.js (st.ortWhy ghi lý do). */
+    st.useOrt = !!(opts.ort && opts.ort.lib); st.ortWhy = opts.ortWhy || null; st.ortS = new Map(); st.ver = { det: false, emb: false };
+    const ortOff = why => { st.useOrt = false; st.ortWhy = why; };
+    function ortSess(stem) {
+      if (!st.ortS.has(stem)) {
+        const raw = st.models[stem]; if (!raw) throw new Error('Thiếu model ' + stem + '.onnx');
+        st.ortS.set(stem, opts.ort.lib.InferenceSession.create(raw.slice(), { executionProviders: opts.ort.ep === 'webgpu' ? ['webgpu', 'wasm'] : ['wasm'], graphOptimizationLevel: 'all' }));
+      }
+      return st.ortS.get(stem);
+    }
+    async function ortRun(stem, data, dims) {
+      const s = await ortSess(stem), feeds = {}; feeds[s.inputNames[0]] = new opts.ort.lib.Tensor('float32', data, dims);
+      const r = await s.run(feeds);
+      return s.outputNames.map(n => { const t = r[n], d = t.dims; return { rows: d.length === 3 ? d[1] : d[0], cols: d.length === 3 ? d[2] : (d[1] || 1), data: t.data instanceof Float32Array ? t.data : Float32Array.from(t.data) }; });
+    }
+    function scPrep(bgr, sz) {
       const w = bgr.cols, h = bgr.rows, r = sz / Math.max(w, h), nw = Math.max(32, Math.round(w * r)), nh = Math.max(32, Math.round(h * r));
-      const W = Math.ceil(nw / 32) * 32, H = Math.ceil(nh / 32) * 32, net = netFor(stem, W, H);
+      const W = Math.ceil(nw / 32) * 32, H = Math.ceil(nh / 32) * 32;
       const rs = new cv.Mat(), pad = new cv.Mat(); cv.resize(bgr, rs, new cv.Size(nw, nh), 0, 0, r < 1 ? cv.INTER_AREA : cv.INTER_LINEAR);
       cv.copyMakeBorder(rs, pad, 0, H - nh, 0, W - nw, cv.BORDER_CONSTANT, new cv.Scalar(0, 0, 0, 0));
-      const blob = cv.blobFromImage(pad, 1 / 128, new cv.Size(W, H), new cv.Scalar(127.5, 127.5, 127.5, 0), true, false);
-      const outs = new cv.MatVector(); let O;
+      const blob = cv.blobFromImage(pad, 1 / 128, new cv.Size(W, H), new cv.Scalar(127.5, 127.5, 127.5, 0), true, false); rs.delete(); pad.delete();
+      return { blob, W, H, r };
+    }
+    function scCv(stem, P) {
+      const net = netFor(stem, P.W, P.H), outs = new cv.MatVector();
       try {
-        net.setInput(blob);
+        net.setInput(P.blob);
         const nm = net.getUnconnectedOutLayersNames(), names = []; for (let i = 0; i < nm.size(); i++) names.push(nm.get(i));
         net.forward2(outs, names);
-        O = []; for (let i = 0; i < outs.size(); i++) { const m = outs.get(i); O.push({ rows: m.rows, cols: m.cols, data: m.data32F.slice() }); m.delete(); }
-      } catch (e) { throw ex(e); } finally { outs.delete(); rs.delete(); pad.delete(); blob.delete(); }
-      const Gp = { 1: [], 4: [], 10: [] }; for (const o of O) Gp[o.cols].push(o);
-      for (const c of [1, 4, 10]) Gp[c].sort((a, b) => b.rows - a.rows);          // theo stride 8, 16, 32
+        const O = []; for (let i = 0; i < outs.size(); i++) { const m = outs.get(i); O.push({ rows: m.rows, cols: m.cols, data: m.data32F.slice() }); m.delete(); }
+        return O;
+      } catch (e) { throw ex(e); } finally { outs.delete(); }
+    }
+    function scDecode(O, P, thr) {
+      const { W, r } = P, Gp = { 1: [], 4: [], 10: [] }; for (const o of O) { if (!Gp[o.cols]) throw new Error('SCRFD: output lạ ' + o.rows + 'x' + o.cols); Gp[o.cols].push(o); }
+      for (const c of [1, 4, 10]) { if (Gp[c].length !== 3) throw new Error('SCRFD: thiếu output'); Gp[c].sort((a, b) => b.rows - a.rows); } // theo stride 8, 16, 32
       const res = [];
       [8, 16, 32].forEach((s, i) => {
         const sc = Gp[1][i], bb = Gp[4][i], kp = Gp[10][i], gw = W / s;
@@ -146,28 +168,49 @@
       });
       return DC.nms(res, 0.4);
     }
+    const sameDets = (A, B) => { // cùng các box điểm ≥ 0,4 (IoU ≥ 0,9, điểm lệch ≤ 0,05)
+      const a = A.filter(d => d.s >= 0.4), b = B.filter(d => d.s >= 0.4);
+      if (a.length !== b.length) return `số box ${a.length} / ${b.length}`;
+      for (const d of a) if (!b.some(e => iouXY(d, e) >= 0.9 && Math.abs(d.s - e.s) <= 0.05)) return 'vị trí / điểm box lệch';
+      return null;
+    };
+    async function runSc(stem, bgr, thr, sz) {
+      const P = scPrep(bgr, sz);
+      try {
+        if (st.useOrt) {
+          try {
+            const R1 = scDecode(await ortRun(stem, P.blob.data32F.slice(), [1, 3, P.H, P.W]), P, thr);
+            if (st.ver.det) return R1;
+            const R0 = scDecode(scCv(stem, P), P, thr), why = sameDets(R1, R0);
+            if (why) { ortOff('kết quả lệch OpenCV.js (' + why + ')'); return R0; }
+            st.ver.det = true; return R1;
+          } catch (e) { ortOff(String((e && e.message) || e).slice(0, 160)); }
+        }
+        return scDecode(scCv(stem, P), P, thr);
+      } finally { P.blob.delete(); }
+    }
     const place = (L, k, ox, oy) => L.map(d => ({ ...d, x: d.x / k + ox, y: d.y / k + oy, w: d.w / k, h: d.h / k, lm: d.lm.map((v, j) => v / k + (j % 2 ? oy : ox)) }));
 
     // cfg: {yunet, nets:[stem], lo, sz, tiles, longSide}
-    DC.pass = null;
-    function detect(w, h, buf, cfg) {
+    async function detect(w, h, buf, cfg) {
       const rgba = cv.matFromImageData(new ImageData(new Uint8ClampedArray(buf), w, h)), bgr = new cv.Mat();
       cv.cvtColor(rgba, bgr, cv.COLOR_RGBA2BGR);
       const nDet = (cfg.yunet ? 1 : 0) + cfg.nets.length;
-      const pass = (mat, sz) => { const L = []; if (cfg.yunet) L.push(...runYu(mat, cfg.lo)); for (const s of cfg.nets) L.push(...runSc(s, mat, cfg.lo, sz)); return nDet > 1 ? DC.fuse(L, 0.4) : L; };
+      const pass = async (mat, sz) => { const L = []; if (cfg.yunet) L.push(...runYu(mat, cfg.lo)); for (const s of cfg.nets) L.push(...await runSc(s, mat, cfg.lo, sz)); return nDet > 1 ? DC.fuse(L, 0.4) : L; };
       let L; const ls = Math.max(w, h);
       try {
-        if (ls > cfg.longSide) { const k = cfg.longSide / ls, tmp = new cv.Mat(); cv.resize(bgr, tmp, new cv.Size(Math.round(w * k), Math.round(h * k)), 0, 0, cv.INTER_AREA); L = place(pass(tmp, cfg.sz), k, 0, 0); tmp.delete(); }
-        else L = pass(bgr, cfg.sz);
+        if (ls > cfg.longSide) { const k = cfg.longSide / ls, tmp = new cv.Mat(); cv.resize(bgr, tmp, new cv.Size(Math.round(w * k), Math.round(h * k)), 0, 0, cv.INTER_AREA); try { L = place(await pass(tmp, cfg.sz), k, 0, 0); } finally { tmp.delete(); } }
+        else L = await pass(bgr, cfg.sz);
         if (cfg.tiles) {
           const tw = Math.min(w, Math.round(w * 0.6)), th = Math.min(h, Math.round(h * 0.6));
           for (const x0 of [0, w - tw]) for (const y0 of [0, h - th]) {
             const roi = bgr.roi(new cv.Rect(x0, y0, tw, th)), rs = new cv.Mat(); cv.resize(roi, rs, new cv.Size(tw * 2, th * 2), 0, 0, cv.INTER_LINEAR);
-            for (const d of place(pass(rs, Math.min(1280, Math.max(rs.cols, rs.rows))), 2, x0, y0)) {
-              const cutL = x0 > 0 && d.x - x0 < 3, cutT = y0 > 0 && d.y - y0 < 3, cutR = x0 + tw < w && x0 + tw - d.x - d.w < 3, cutB = y0 + th < h && y0 + th - d.y - d.h < 3;
-              if (!(cutL || cutT || cutR || cutB)) L.push(d);
-            }
-            roi.delete(); rs.delete();
+            try {
+              for (const d of place(await pass(rs, Math.min(1280, Math.max(rs.cols, rs.rows))), 2, x0, y0)) {
+                const cutL = x0 > 0 && d.x - x0 < 3, cutT = y0 > 0 && d.y - y0 < 3, cutR = x0 + tw < w && x0 + tw - d.x - d.w < 3, cutB = y0 + th < h && y0 + th - d.y - d.h < 3;
+                if (!(cutL || cutT || cutR || cutB)) L.push(d);
+              }
+            } finally { roi.delete(); rs.delete(); }
           }
           L = DC.nms(L, 0.4);
         }
@@ -186,8 +229,9 @@
     }
 
     // nhúng ArcFace: lms = [[10 số], ...] toạ độ ảnh gốc -> mảng Float32Array(512) đã chuẩn hoá L2
-    function embed(w, h, buf, lms) {
-      if (!st.arc) st.arc = netFor('w600k_mbf', 112, 112, [1, 3, 112, 112]);
+    const l2 = e => { let n = 0; for (const v of e) n += v * v; n = Math.sqrt(n) + 1e-9; for (let i = 0; i < e.length; i++) e[i] /= n; return e; };
+    function arcCv(blob) { if (!st.arc) st.arc = netFor('w600k_mbf', 112, 112, [1, 3, 112, 112]); st.arc.setInput(blob); const o = st.arc.forward(); const e = Float32Array.from(o.data32F); o.delete(); return l2(e); }
+    async function embed(w, h, buf, lms) {
       const rgba = cv.matFromImageData(new ImageData(new Uint8ClampedArray(buf), w, h)), rgb = new cv.Mat(); cv.cvtColor(rgba, rgb, cv.COLOR_RGBA2RGB); rgba.delete();
       const res = [];
       try {
@@ -195,13 +239,22 @@
           const M = cv.matFromArray(2, 3, cv.CV_64F, DC.simMatrix(lm)), al = new cv.Mat();
           cv.warpAffine(rgb, al, M, new cv.Size(112, 112), cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar(0, 0, 0, 0)); M.delete();
           const blob = cv.blobFromImage(al, 1 / 127.5, new cv.Size(112, 112), new cv.Scalar(127.5, 127.5, 127.5, 0), false, false); al.delete();
-          st.arc.setInput(blob); const o = st.arc.forward(); const e = Float32Array.from(o.data32F); o.delete(); blob.delete();
-          let n = 0; for (const v of e) n += v * v; n = Math.sqrt(n) + 1e-9; for (let i = 0; i < e.length; i++) e[i] /= n; res.push(e);
+          try {
+            let e = null;
+            if (st.useOrt) {
+              try {
+                e = l2(Float32Array.from((await ortRun('w600k_mbf', blob.data32F.slice(), [1, 3, 112, 112]))[0].data));
+                if (!st.ver.emb) { const c = arcCv(blob); let d = 0; for (let i = 0; i < c.length; i++) d += c[i] * e[i]; if (e.length !== c.length || d < 0.99) { ortOff('ArcFace lệch OpenCV.js (cos ' + d.toFixed(3) + ')'); e = c; } else st.ver.emb = true; }
+              } catch (er) { ortOff(String((er && er.message) || er).slice(0, 160)); e = null; }
+            }
+            res.push(e || arcCv(blob));
+          } finally { blob.delete(); }
         }
       } catch (e) { throw ex(e); } finally { rgb.delete(); }
       return res;
     }
-    return { detect, embed, addModel(stem, bytes) { st.models[stem] = bytes; } };
+    const backend = () => st.useOrt ? 'onnxruntime-web (' + opts.ort.ep + ')' : 'OpenCV.js' + (st.ortWhy ? ' — không dùng onnxruntime-web: ' + st.ortWhy : '');
+    return { detect, embed, backend, addModel(stem, bytes) { st.models[stem] = bytes; } };
   };
   G.DetCore = DC;
 })(typeof self !== 'undefined' ? self : window);

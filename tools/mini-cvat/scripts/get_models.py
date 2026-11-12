@@ -4,6 +4,7 @@
   python scripts/get_models.py                 # det_500m + w600k_mbf (~16 MB)
   python scripts/get_models.py --all           # thêm det_10g (~17 MB, SCRFD chính xác hơn)
   python scripts/get_models.py det_10g         # chỉ model chỉ định
+  python scripts/get_models.py --ort           # gói onnxruntime-web (npm) vào lib/ort/, để chạy model nhanh hơn
 
 Model lấy từ gói insightface "buffalo_sc" / "buffalo_l" (GitHub releases v0.7). Chỉ đọc đúng file cần trong zip
 (HTTP Range), không phải tải cả gói 288 MB. Kiểm tra SHA-256 sau khi tải.
@@ -102,9 +103,57 @@ def ensure(stem, log=print):
     return path
 
 
+ORT_VERSION = '1.20.1'
+ORT_DIR = os.path.join(os.path.dirname(HERE), 'lib', 'ort')
+ORT_MAIN = ['ort.all.min.js', 'ort.webgpu.min.js', 'ort.min.js']
+
+
+def ensure_ort(log=print):
+    """Tải onnxruntime-web (npm, MIT) vào lib/ort/ và ghi lib/ort/manifest.json. Kiểm tra mã băm npm công bố (sha512)."""
+    import base64, io, json, tarfile
+    man = os.path.join(ORT_DIR, 'manifest.json')
+    if os.path.isfile(man):
+        try:
+            m = json.load(open(man))
+            if m.get('version') == ORT_VERSION and os.path.isfile(os.path.join(ORT_DIR, m['main'])):
+                return man
+        except Exception:  # noqa
+            pass
+    log('Đang tải onnxruntime-web %s từ npm ...' % ORT_VERSION)
+    meta = json.loads(_get('https://registry.npmjs.org/onnxruntime-web/' + ORT_VERSION)[1])
+    tgz = _get(meta['dist']['tarball'])[1]
+    integ = meta['dist'].get('integrity', '')
+    if integ.startswith('sha512-'):
+        if base64.b64encode(hashlib.sha512(tgz).digest()).decode() != integ[7:]:
+            raise RuntimeError('Mã băm gói onnxruntime-web không khớp')
+    elif hashlib.sha1(tgz).hexdigest() != meta['dist'].get('shasum'):
+        raise RuntimeError('Mã băm gói onnxruntime-web không khớp')
+    os.makedirs(ORT_DIR, exist_ok=True)
+    names = []
+    with tarfile.open(fileobj=io.BytesIO(tgz), mode='r:gz') as t:
+        for mbr in t.getmembers():
+            n = mbr.name
+            if not mbr.isfile() or not n.startswith('package/dist/') or '/' in n[len('package/dist/'):]:
+                continue
+            base = n[len('package/dist/'):]
+            if base.endswith(('.map', '.d.ts')) or not base.endswith(('.js', '.mjs', '.wasm')):
+                continue
+            with open(os.path.join(ORT_DIR, base), 'wb') as f:
+                f.write(t.extractfile(mbr).read())
+            names.append(base)
+    main = next((x for x in ORT_MAIN if x in names), None)
+    if not main:
+        raise RuntimeError('Gói onnxruntime-web không có ' + ' / '.join(ORT_MAIN))
+    json.dump({'version': ORT_VERSION, 'main': main, 'files': sorted(names)}, open(man, 'w'))
+    log('Đã lưu onnxruntime-web vào %s (%d file)' % (ORT_DIR, len(names)))
+    return man
+
+
 if __name__ == '__main__':
     a = [x for x in sys.argv[1:] if not x.startswith('-')]
-    names = list(MODELS) if '--all' in sys.argv else (a or DEFAULT)
+    names = list(MODELS) if '--all' in sys.argv else (a or ([] if '--ort' in sys.argv else DEFAULT))
     for s in names:
         ensure(s)
+    if '--ort' in sys.argv:
+        ensure_ort()
     print('Xong. Mở Mini CVAT bằng: python scripts/serve.py')
