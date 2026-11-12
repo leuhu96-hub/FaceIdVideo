@@ -7,12 +7,14 @@ Công cụ gán nhãn video chạy hoàn toàn trong trình duyệt, kèm đánh
 ```
 git clone https://github.com/leuhu96-hub/FaceIdVideo
 cd FaceIdVideo/tools/mini-cvat
-python -m http.server 8000
+python scripts/serve.py
 ```
 
 Mở http://localhost:8000 bằng Chrome hoặc Edge, bấm **Mở video** (MP4 H.264 hoặc WebM).
 
-Mở thẳng `index.html` (double-click) vẫn chạy được, nhưng Web Worker bị chặn nên video có thể giật khi chạy YuNet. Nên dùng web server như trên.
+`scripts/serve.py` là web server thường (chỉ dùng thư viện chuẩn của Python) có thêm một việc: khi **Tự gán nhãn** cần model SCRFD / ArcFace mà chưa có trong `models/`, nó tự tải về một lần. `python -m http.server 8000` vẫn dùng được cho mọi chức năng khác, nhưng khi đó phải chạy `python scripts/get_models.py` trước (hoặc dùng nút **Nạp model từ file…**).
+
+Mở thẳng `index.html` (double-click) vẫn chạy được phần gán nhãn, nhưng Web Worker bị chặn: video có thể giật khi chạy YuNet, và **Tự gán nhãn** phải chạy trong luồng chính (chậm hơn nhiều). Nên dùng `serve.py`.
 
 ## Cấu trúc
 
@@ -21,11 +23,14 @@ Mở thẳng `index.html` (double-click) vẫn chạy được, nhưng Web Worke
 | `index.html` | Công cụ gán nhãn, Đánh giá GT, Box model, Đánh giá model so với GT |
 | `lib/opencv.js` | OpenCV.js 4.10 (Apache 2.0), chỉ tải khi chạy nhóm C hoặc Box model |
 | `lib/yunet_model.js` | YuNet 2026may (MIT), nhúng dạng base64 |
-| `lib/md_worker.js` | Web Worker chạy YuNet |
+| `lib/md_worker.js` | Web Worker chạy YuNet (nút "Tự chạy YuNet") |
+| `lib/det_core.js`, `lib/det_worker.js` | Lõi + Web Worker của **Tự gán nhãn**: SCRFD, YuNet, ArcFace; nhiều worker chạy song song |
+| `models/` | SCRFD / ArcFace `.onnx` (tự tải, không đưa vào git) |
 | `sample/` | Video thử `c1.webm` (2 người, có cài sẵn lỗi GT) và nhãn `c1_gt.json` |
 | `scripts/analyze_gt.py` | Phân tích GT đầy đủ, xuất báo cáo HTML + CSV + tham số gợi ý |
 | `scripts/eval_face_postproc.py` | Chạy YuNet, so sánh 9 biến thể post-processing với GT |
 | `scripts/make_test_video.py` | Tạo video thử có lỗi GT cài sẵn |
+| `scripts/serve.py`, `scripts/get_models.py` | Web server có tự tải model; tải model SCRFD / ArcFace (kiểm tra SHA-256) |
 | `scripts/eval_privacy.py` | Đo tỷ lệ lộ mặt của kết quả che so với GT mở rộng, một file hoặc cả folder |
 
 ## Định dạng hỗ trợ
@@ -103,12 +108,24 @@ Dành cho bài toán "chọn một người, che mặt mọi người còn lại
 
 ### Tự gán nhãn (máy gán trước, người chỉ duyệt)
 
-Nút **Tự gán nhãn** → **Chạy**. Mọi thứ chạy trong trình duyệt, không cần cài model nào khác:
+Nút **Tự gán nhãn** → **Chạy**. Mọi thứ chạy trong trình duyệt; video không rời khỏi máy.
 
-1. YuNet ngưỡng thấp chạy trên mọi frame. Bật **Bắt mặt nhỏ** để chạy thêm trên 4 ô phóng to 2× (chậm hơn khoảng 4–5 lần).
-2. Các box được ghép thành track (box điểm cao ghép trước, điểm thấp ghép sau), cắt track ở chỗ chuyển cảnh, nối các đoạn đứt gần nhau khi chỉ có một cách ghép.
-3. Track được rút gọn thành keyframe; các thuộc tính **cắt ở mép**, **Ignore** (mặt nhỏ), **độ mờ**, **góc mặt** được điền sẵn. "Bị che" và "nhận ra được" không tự điền.
-4. Những chỗ cần người xem được đưa vào danh sách nghi vấn (`[` `]`): track điểm thấp cần xác nhận, track bắt đầu / kết thúc giữa khung hình, đoạn nội suy dài, đoạn đã nối.
+1. **Tìm mặt** ở mọi frame với ngưỡng thấp. Bộ dò chọn trong hộp thoại:
+
+   | Lựa chọn | Dùng khi | Cần tải |
+   | --- | --- | --- |
+   | SCRFD-500M + YuNet (mặc định) | cân bằng tốc độ và độ sót; hai bộ dò khác nhau nên GT ít nghiêng về một mô hình | 2,5 MB |
+   | SCRFD-10G + YuNet | cần ít sót nhất (mặt nhỏ, mờ, nghiêng); chậm hơn khoảng 10 lần | 17 MB |
+   | SCRFD-10G / SCRFD-500M | chỉ một bộ dò SCRFD | như trên |
+   | YuNet | không muốn tải gì | 0 |
+
+   Hai bộ dò chạy cùng lúc thì box được gộp (toạ độ trung bình theo điểm). **Cỡ vào** (640 / 960 / 1280) là cạnh dài ảnh đưa vào SCRFD; lớn hơn bắt mặt nhỏ tốt hơn nhưng chậm theo số pixel. **Bắt mặt nhỏ** chạy thêm 4 ô phóng to 2×.
+2. **Ghép track kiểu ByteTrack** (cài lại bằng JavaScript, không phải bản gốc): box điểm cao ghép trước, điểm thấp ghép sau, có dự đoán chuyển động; cắt track ở chỗ chuyển cảnh; nối các đoạn đứt gần nhau khi chỉ có một cách ghép.
+3. **ReID bằng khuôn mặt (ArcFace MobileFaceNet)**: mỗi track lấy tối đa 5 mặt rõ, thẳng, đủ lớn (≥32 px) để nhúng; các track không xuất hiện cùng lúc mà độ giống ≥0,50 được gộp dần (cặp giống nhất trước) thành một track nhiều đoạn, giữa các đoạn **không** nội suy. Cặp giống 0,32–0,50 chỉ được gợi ý (điểm nghi vấn "Có thể cùng người", gộp bằng `J`). Chế độ ReID: tự nối / chỉ gợi ý / tắt. Mặt nghiêng hẳn hoặc quá nhỏ không đủ tin cậy để so, nên track chỉ toàn mặt nghiêng không bao giờ được nối tự động.
+4. Track được rút gọn thành keyframe; các thuộc tính **cắt ở mép**, **Ignore** (mặt nhỏ), **độ mờ**, **góc mặt** được điền sẵn. "Bị che" và "nhận ra được" không tự điền.
+5. Những chỗ cần người xem được đưa vào danh sách nghi vấn (`[` `]`): track điểm thấp cần xác nhận, track bắt đầu / kết thúc giữa khung hình, đoạn nội suy dài, đoạn đã nối, **đoạn nối bằng khuôn mặt** (kèm độ giống), **có thể cùng người**.
+
+Tốc độ: mỗi frame cần một lần chạy mỗi bộ dò. Trong môi trường thử (2 nhân, không GPU) ở 960×544, SCRFD-500M ≈ 0,8 s/frame, SCRFD-10G ≈ 13 s/frame, YuNet ≈ 0,6 s/frame trên một luồng. Chương trình mở nhiều Web Worker (mặc định số nhân − 1, tối đa 6, chỉnh ở ô **Luồng**) nên tốc độ tăng gần tuyến tính theo số nhân. Dùng "Quét mỗi N frame" lớn hơn 1 để nhanh hơn (các frame giữa được nội suy), nhưng chuyển cảnh khi đó dễ bị báo nhầm.
 
 Việc của người gán nhãn:
 
@@ -116,9 +133,14 @@ Việc của người gán nhãn:
 - Xem lướt cả video một lần để tìm **mặt không có box nào**. Máy không thấy thì hàng đợi không nhắc; đây là loại lỗi làm số lộ mặt đẹp giả.
 - Bấm `M` cho người được chọn, sửa thuộc tính sai, rồi **Chuẩn nhãn** và **Xuất**.
 
-"Nhãn đã có: giữ" chỉ thêm mặt chưa có box, nên chạy lại sau khi đã sửa tay vẫn an toàn. `Ctrl+Z` bỏ toàn bộ kết quả một lần chạy. Muốn tìm thêm các track cùng người bị tách, chạy **Đánh giá GT** nhóm C với SFace rồi gộp bằng `J`.
+"Nhãn đã có: giữ" chỉ thêm mặt chưa có box, nên chạy lại sau khi đã sửa tay vẫn an toàn. `Ctrl+Z` bỏ toàn bộ kết quả một lần chạy. Muốn rà thêm các track cùng người bị tách, chạy **Đánh giá GT** nhóm C với SFace rồi gộp bằng `J`.
 
-Lưu ý: GT gán trước bằng YuNet sẽ thiên về những mặt YuNet thấy được. Nếu pipeline cần đánh giá cũng dùng YuNet, bước xem lướt tìm mặt sót càng quan trọng.
+Lưu ý:
+
+- GT gán trước sẽ thiên về những mặt bộ dò đã dùng thấy được. Nếu pipeline cần đánh giá cũng dùng SCRFD hoặc YuNet, hãy dùng bản gộp hai bộ dò và xem lướt cả video để tìm mặt sót.
+- Model SCRFD và ArcFace lấy từ gói insightface (`buffalo_sc`, `buffalo_l`), **chỉ cho nghiên cứu phi thương mại**. Dùng để gán nhãn và đánh giá nội bộ thì ổn; nếu đưa vào sản phẩm thì phải dùng model có giấy phép phù hợp. Vì vậy `models/` không nằm trong git.
+- ReID ở đây chỉ dựa vào mặt. Người quay lưng hoặc che mặt không nối được bằng cách này; cần gộp tay hoặc ReID thân người (chưa có).
+- Cơ chế: SCRFD xuất ONNX với shape đầu vào động mà OpenCV.js 4.10 không suy được, nên chương trình tự sửa byte ONNX để cố định đầu vào 1×3×H×W trước khi nạp (`DetCore.staticOnnx`, không cần cài thêm gì).
 
 ### Gán nhãn
 
