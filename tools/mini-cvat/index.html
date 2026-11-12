@@ -1919,12 +1919,19 @@ async function plPump(pool,items,prog,label,job){ // gửi lần lượt từng 
   const J=await job(it);if(!J){n++;continue}
   const p=pool.run(J.msg,J.tr).then(r=>J.done(r)).catch(e=>{err=err||e}).finally(()=>inflight.delete(p));inflight.add(p);n++;await new Promise(r=>setTimeout(r,0))}
  while(inflight.size)await Promise.all([...inflight]);if(err)throw err}
+function plBadBox(b,opt){ // lý do loại một box (null = giữ). Chỉ dùng khi bật "Lọc chặt"
+ const ar=b.w/b.h;if(ar<0.45||ar>1.6)return 'tỉ lệ khung phi lý';
+ const L=b.lm,px=b.w*0.15,py=b.h*0.15;for(let j=0;j<5;j++)if(L[2*j]<b.x-px||L[2*j]>b.x+b.w+px||L[2*j+1]<b.y-py||L[2*j+1]>b.y+b.h+py)return 'landmark ngoài box';
+ const ey=(L[1]+L[3])/2,my=(L[7]+L[9])/2;if(!(ey<L[5]&&L[5]<my))return 'landmark sai thứ tự (mắt-mũi-miệng)';
+ if(Math.hypot(L[0]-L[2],L[1]-L[3])<0.12*b.w)return 'hai mắt quá gần nhau';
+ const multi=(opt.yunet?1:0)+opt.nets.length>1;if(multi&&b.n<2&&b.s<opt.hi)return 'chỉ một bộ dò thấy, điểm thấp';
+ return null}
 async function plDetect(opt,prog){
  const pool=PL.pool=new DetPool();await pool.init(opt.stems,prog,opt.threads);
  const full=mkCanvas(S.w,S.h),fg=full.getContext('2d',{willReadFrequently:true}),sm=mkCanvas(160,90),gsm=sm.getContext('2d',{willReadFrequently:true});
  const frames=[];for(let f=0;f<S.n;f+=opt.stride)frames.push(f);
  const keep=opt.mode==='add'?gtData(opt.label):null,D=new Map(),cuts=new Set(),cfg={yunet:opt.yunet,nets:opt.nets,lo:opt.lo,sz:opt.sz,tiles:opt.tiles,longSide:opt.longSide};
- let prevN=null,nDet=0;const t0=performance.now();
+ let prevN=null,nDet=0;const t0=performance.now(),R0={drop:{}};
  await plPump(pool,frames,prog,'Đang tìm mặt',async f=>{
   await src.seek(f);fg.drawImage(src.image,0,0,S.w,S.h);
   gsm.drawImage(src.image,0,0,160,90);{const g=grayOf(gsm.getImageData(0,0,160,90)),[m,sd]=meanStd(g),nm=g.map(v=>(v-m)/(sd+1e-6));if(prevN){let c=0;for(let i=0;i<g.length;i++)c+=nm[i]*prevN[i];if(c/g.length<0.5)cuts.add(f)}prevN=nm}
@@ -1932,9 +1939,10 @@ async function plDetect(opt,prog){
   return {msg:{t:'det',w:S.w,h:S.h,buf:id.data.buffer,cfg},tr:[id.data.buffer],done:r=>{
    const G=keep?(keep.F.get(f)||[]).map(i=>keep.rows[i]):[],out=[];
    for(const d of r.dets){const x0=clamp(d.x,0,S.w),y0=clamp(d.y,0,S.h),x1=clamp(d.x+d.w,0,S.w),y1=clamp(d.y+d.h,0,S.h);if(x1-x0<3||y1-y0<3)continue;
-    const b={f,x:x0,y:y0,w:x1-x0,h:y1-y0,s:d.s,lm:d.lm,n:d.n||1,sh:sharp64(Float32Array.from(d.g))};if(G.some(g=>iou(b,g)>=0.3))continue;out.push(b)}
+    const b={f,x:x0,y:y0,w:x1-x0,h:y1-y0,s:d.s,lm:d.lm,n:d.n||1,sh:sharp64(Float32Array.from(d.g))};if(G.some(g=>iou(b,g)>=0.3))continue;
+    if(opt.strict){const why=plBadBox(b,opt);if(why){R0.drop[why]=(R0.drop[why]||0)+1;continue}}out.push(b)}
    D.set(f,out);nDet+=out.length}}});
- return {D,frames,cuts,nDet,sec:(performance.now()-t0)/1000}}
+ return {D,frames,cuts,nDet,drop:R0.drop,sec:(performance.now()-t0)/1000}}
 function plTrack(D,frames,cuts,opt){
  const done=[],act=[];
  const pred=(t,f)=>{const a=t.d.at(-1);if(t.d.length<2)return a;const b=t.d.at(-2),k=Math.min(f-a.f,3*opt.stride)/Math.max(1,a.f-b.f);
@@ -1949,14 +1957,15 @@ function plTrack(D,frames,cuts,opt){
   for(const d of [...restHi,...restLo])act.push({d:[d],seg});
   for(let i=act.length-1;i>=0;i--)if(f-act[i].d.at(-1).f>opt.maxGap)done.push(...act.splice(i,1))}
  done.push(...act);
- let T=done.filter(t=>t.d.length>=opt.minLen||t.d.some(d=>d.s>=opt.hi+0.1));
+ const okT=t=>{if(!opt.strict)return t.d.length>=opt.minLen||t.d.some(d=>d.s>=opt.hi+0.1);const hi=t.d.filter(d=>d.s>=opt.hi).length;return hi>=Math.min(2,t.d.length)&&(t.d.length>=opt.minLen||t.d[0].s>=opt.hi+0.15)};
+ let T=done.filter(okT);const weak=done.length-T.length;
  // nối đoạn đứt: A kết thúc, B bắt đầu gần đó ngay sau, và chỉ có đúng một cách ghép
  let links=0;for(let again=true;again;){again=false;T.sort((a,b)=>a.d[0].f-b.d[0].f);
   const cand=a=>{const e=a.d.at(-1);return T.filter(b=>{if(b===a||b.seg!==a.seg)return false;const s=b.d[0],g=s.f-e.f;if(g<=0||g>opt.linkGap)return false;
    const r=s.h/e.h;if(r<0.5||r>2)return false;return Math.hypot(s.x+s.w/2-e.x-e.w/2,s.y+s.h/2-e.y-e.h/2)<=(1+4*g/S.fps)*Math.max(e.w,e.h)})};
   const back=b=>T.filter(a=>a!==b&&cand(a).includes(b));
   for(const a of T){const C=cand(a);if(C.length!==1||back(C[0]).length!==1)continue;const b=C[0];(a.links||(a.links=[])).push([a.d.at(-1).f,b.d[0].f],...(b.links||[]));a.d.push(...b.d);T=T.filter(x=>x!==b);links++;again=true;break}}
- return {T,links}}
+ return {T,links,weak}}
 function plAttrs(t,opt){ // thuộc tính tự điền cho từng box của track, làm mượt bằng đa số trong cửa sổ ±3
  const E=1.5,raw=t.d.map(d=>{const e1=[d.lm[0],d.lm[1]],e2=[d.lm[2],d.lm[3]],ed=Math.max(dist(e1,e2),1e-3),ux=(e2[0]-e1[0])/ed,uy=(e2[1]-e1[1])/ed;
   const off=Math.abs((d.lm[4]-(e1[0]+e2[0])/2)*ux+(d.lm[5]-(e1[1]+e2[1])/2)*uy)/ed,prof=ed<0.2*d.w;
@@ -1984,7 +1993,7 @@ function plReidMerge(T,opt){
  const seen=new Set(),sugg=[];for(const p of pairs()){if(p.s<opt.reidSuggest)break;if(seen.has(p.a)||seen.has(p.b))continue;seen.add(p.a);seen.add(p.b);sugg.push(p)}
  return {mode:opt.reid,emb:G.length,tracks:T.length,merged,events,sugg}}
 async function plLink(R,opt,prog){
- const {T,links}=plTrack(R.D,R.frames,R.cuts,opt);T.forEach((t,i)=>t.d.forEach(d=>{d.pt=i}));R.T=T;R.links=links;R.reid=null;
+ const {T,links,weak}=plTrack(R.D,R.frames,R.cuts,opt);T.forEach((t,i)=>t.d.forEach(d=>{d.pt=i}));R.T=T;R.links=links;R.weak=weak;R.reid=null;
  if(opt.reid==='off'||T.length<2||!PL.pool)return;
  const pick=t=>{const ok=d=>d.s>=Math.max(0.5,opt.hi-0.1)&&Math.min(d.w,d.h)>=opt.reidMinPx&&d.sh>=opt.blur2&&plPose(d)<opt.reidPose;
   const c=t.d.filter(ok).sort((a,b)=>b.s*Math.min(b.w,b.h)-a.s*Math.min(a.w,a.h)),sp=Math.max(3,Math.floor(t.d.length/8)),o=[];
@@ -2021,9 +2030,9 @@ function plBuild(R,opt){
  for(const s of RE?.sugg||[]){if(!idOf.has(s.a)||!idOf.has(s.b))continue;const [x,y]=s.a.d[0].f<=s.b.d[0].f?[s.a,s.b]:[s.b,s.a];
   add(y.d[0].f,idOf.get(y),'Có thể cùng người',`Khuôn mặt giống #${idOf.get(x)} (độ giống ${s.s.toFixed(2)}, hai track không xuất hiện cùng lúc). Nếu cùng một người: chọn một track rồi bấm J để gộp.`)}
  issues.sort((a,b)=>a.f-b.f||a.id-b.id);
- return {tracks:out,issues,links,nBox,nIgn,cuts:[...R.cuts],nDet:R.nDet,sec:R.sec,frames:R.frames.length,opt,detName:opt.detName||'YuNet',reid:RE?{mode:RE.mode,emb:RE.emb,merged:RE.merged,sugg:RE.sugg.length}:null,when:new Date().toLocaleString()}}
+ return {tracks:out,issues,links,nBox,nIgn,drop:R.drop||{},weak:R.weak||0,cuts:[...R.cuts],nDet:R.nDet,sec:R.sec,frames:R.frames.length,opt,detName:opt.detName||'YuNet',reid:RE?{mode:RE.mode,emb:RE.emb,merged:RE.merged,sugg:RE.sugg.length}:null,when:new Date().toLocaleString()}}
 function renderPL(r){const kp=(v,l)=>`<div><b>${v}</b><span>${l}</span></div>`,kinds=[...new Set(r.issues.map(i=>i.kind))];
- let h=`<div class="evk">${kp(r.tracks.length,'track mặt đã tạo')}${kp(r.nBox,'mặt-frame')}${kp(r.nIgn,'track mặt nhỏ (Ignore)')}${kp(r.links,'đoạn đứt đã nối')}${r.reid?kp(r.reid.merged,'lần nối bằng khuôn mặt (ReID)'):''}${kp(r.cuts.length,'chuyển cảnh')}${kp(r.issues.length,'điểm cần xem')}${kp(Math.round(r.sec)+' s',`${r.frames} frame đã quét`)}</div>
+ let h=`<div class="evk">${kp(r.tracks.length,'track mặt đã tạo')}${kp(r.nBox,'mặt-frame')}${kp(r.nIgn,'track mặt nhỏ (Ignore)')}${kp(r.links,'đoạn đứt đã nối')}${r.reid?kp(r.reid.merged,'lần nối bằng khuôn mặt (ReID)'):''}${r.opt.strict?kp(Object.values(r.drop).reduce((a,b)=>a+b,0)+' / '+r.weak,'box / track yếu đã loại'):''}${kp(r.cuts.length,'chuyển cảnh')}${kp(r.issues.length,'điểm cần xem')}${kp(Math.round(r.sec)+' s',`${r.frames} frame đã quét`)}</div>
  <div class="gtbox"><b>Việc còn lại của bạn</b><ul>
   <li>Bộ dò: <b>${esc(r.detName)}</b>${r.reid?` · ReID: ${r.reid.emb} track có khuôn mặt đủ rõ để so, ${r.reid.merged} lần tự nối, ${r.reid.sugg} gợi ý cùng người`:''}.</li>
   <li>Bấm <kbd>]</kbd> để đi lần lượt qua ${r.issues.length} điểm cần xem (${kinds.map(k=>`${esc(k)}: ${r.issues.filter(i=>i.kind===k).length}`).join(' · ')||'không có'}). Track sai: <kbd>Del</kbd>. Hai track cùng một người: chọn một track rồi <kbd>J</kbd>.</li>
@@ -2038,12 +2047,13 @@ function plDetOpt(){const v=$('#plDet').value,m=PL_DETS[v],reid=$('#plReid').val
  return {det:v,detName:m.label.replace(/ \(.*\)$/,''),yunet:m.yunet,nets:m.nets,sz:+$('#plSz').value||960,reid,reidMerge:0.5,reidSuggest:0.32,reidMinPx:32,reidPose:0.45,threads:Math.max(0,Math.round(+$('#plThr').value||0)),stems:[...m.nets,...(reid!=='off'?['w600k_mbf']:[])]}}
 function showPL(){
  if(!src)return toast('Hãy mở video trước');if(playing)togglePlay();
- const o={det:'sc500+yu',sz:960,reid:'merge',threads:0,...(PL.opt||{stride:1,lo:0.3,hi:0.6,tiles:false,mode:'add',minPx:14,longSide:1280})};
+ const o={det:'sc500+yu',sz:960,reid:'merge',threads:0,...(PL.opt||{stride:1,lo:0.4,hi:0.65,tiles:false,mode:'add',minPx:14,longSide:1280,strict:true})};
  openModal('Tự gán nhãn mặt',`<div class="gtcfg"><div class="mdrow" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
   <label title="1 = mọi frame (nên dùng cho GT). Lớn hơn thì nhanh hơn, các frame giữa được nội suy">Quét mỗi <input class="num" id="plStride" type="number" min="1" max="30" value="${o.stride}"> frame</label>
   <label title="Box có điểm từ mức này trở lên đều được giữ lại để ghép track. Thấp = ít sót, nhiều box sai cần xoá">Điểm thấp ≥ <input class="num" id="plLo" type="number" step="0.05" min="0.1" max="0.9" value="${o.lo}"></label>
   <label title="Box từ mức này trở lên được coi là chắc chắn">Điểm chắc ≥ <input class="num" id="plHi" type="number" step="0.05" min="0.2" max="0.95" value="${o.hi}"></label>
   <label title="Mặt có cạnh ngắn nhỏ hơn mức này được tự đặt Ignore">Ignore mặt &lt; <input class="num" id="plMin" type="number" min="0" max="64" value="${o.minPx}"> px</label>
+  <label class="chk" title="Loại box có tỉ lệ / landmark phi lý, box chỉ một bộ dò thấy mà điểm thấp, và track không có ít nhất 2 box điểm cao. Bỏ chọn nếu thấy bị mất mặt thật"><input type="checkbox" id="plStrict" ${o.strict!==false?'checked':''}>Lọc chặt box lạ (khuyên dùng)</label>
   <label class="chk" title="Chạy thêm trên 4 ô phóng to 2×. Bắt được mặt nhỏ ở xa, chậm hơn khoảng 4–5 lần"><input type="checkbox" id="plTiles" ${o.tiles?'checked':''}>Bắt mặt nhỏ (chậm hơn)</label>
   <label title="Bộ dò mặt. SCRFD-10G chính xác nhất nhưng chậm gấp 10 lần SCRFD-500M. Gộp với YuNet: lấy cả hai kết quả, ít sót hơn và GT ít nghiêng về một mô hình">Bộ dò <select class="btn" id="plDet">${Object.entries(PL_DETS).map(([k,v])=>`<option value="${k}"${o.det===k?' selected':''}>${v.label}</option>`).join('')}</select></label>
   <label title="Cạnh dài của ảnh đưa vào SCRFD. Lớn hơn thì bắt mặt nhỏ tốt hơn nhưng chậm hơn (tỉ lệ với số pixel)">Cỡ vào <select class="btn" id="plSz">${[640,960,1280].map(v=>`<option${+o.sz===v?' selected':''}>${v}</option>`).join('')}</select></label>
@@ -2059,7 +2069,7 @@ function showPL(){
  $('#plModelBtn').onclick=()=>$('#plModelIn').click();
  $('#plModelIn').onchange=async e=>{let n=0;for(const f of e.target.files){const st=f.name.replace(/\.onnx$/i,'');if(MODELS[st]){MODEL.bytes.set(st,new Uint8Array(await f.arrayBuffer()));n++}}e.target.value='';toast(n?`Đã nạp ${n} model`:'Tên file phải là det_500m.onnx, det_10g.onnx hoặc w600k_mbf.onnx',4000)};
  $('#plRun').onclick=async()=>{if(PL.running)return;const lo=clamp(+$('#plLo').value||0.3,0.1,0.9),stride=clamp(Math.round(+$('#plStride').value)||1,1,30);
-  const opt={stride,lo,hi:Math.max(lo,clamp(+$('#plHi').value||0.6,0.2,0.95)),tiles:$('#plTiles').checked,mode:$('#plMode').value,minPx:Math.max(0,+$('#plMin').value||0),longSide:1280,blur1:60,blur2:25,
+  const opt={stride,lo,hi:Math.max(lo,clamp(+$('#plHi').value||0.6,0.2,0.95)),tiles:$('#plTiles').checked,strict:$('#plStrict').checked,mode:$('#plMode').value,minPx:Math.max(0,+$('#plMin').value||0),longSide:1280,blur1:60,blur2:25,
    maxGap:Math.max(2*stride,Math.round(S.fps*0.4)),linkGap:Math.max(3*stride,Math.round(S.fps*1.5)),minLen:3,gapWarn:Math.max(4,Math.round(S.fps/5))};
   Object.assign(opt,plDetOpt());
   Object.assign(opt,window.PL_DEBUG||{}); // móc gỡ lỗi: window.PL_DEBUG={maxGap:1,linkGap:0,debug:true}

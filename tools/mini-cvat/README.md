@@ -125,6 +125,8 @@ Nút **Tự gán nhãn** → **Chạy**. Mọi thứ chạy trong trình duyệt
 4. Track được rút gọn thành keyframe; các thuộc tính **cắt ở mép**, **Ignore** (mặt nhỏ), **độ mờ**, **góc mặt** được điền sẵn. "Bị che" và "nhận ra được" không tự điền.
 5. Những chỗ cần người xem được đưa vào danh sách nghi vấn (`[` `]`): track điểm thấp cần xác nhận, track bắt đầu / kết thúc giữa khung hình, đoạn nội suy dài, đoạn đã nối, **đoạn nối bằng khuôn mặt** (kèm độ giống), **có thể cùng người**.
 
+**Lọc chặt box lạ** (bật mặc định, ngưỡng mặc định điểm thấp 0,4 / điểm chắc 0,65): loại box có tỉ lệ khung phi lý, landmark ngoài box hoặc sai thứ tự mắt-mũi-miệng, box mà khi chạy hai bộ dò chỉ một bộ thấy và điểm thấp, và track không có ít nhất 2 box điểm cao. Báo cáo ghi số box và track đã loại. Nếu thấy mất mặt thật (mặt rất nhỏ, mờ), tắt lọc chặt hoặc hạ điểm thấp xuống 0,3, bù lại sẽ có thêm track rác cần xoá bằng `Del`.
+
 Tốc độ: mỗi frame cần một lần chạy mỗi bộ dò. Trong môi trường thử (2 nhân, không GPU) ở 960×544, SCRFD-500M ≈ 0,8 s/frame, SCRFD-10G ≈ 13 s/frame, YuNet ≈ 0,6 s/frame trên một luồng. Chương trình mở nhiều Web Worker (mặc định số nhân − 1, tối đa 6, chỉnh ở ô **Luồng**) nên tốc độ tăng gần tuyến tính theo số nhân. Dùng "Quét mỗi N frame" lớn hơn 1 để nhanh hơn (các frame giữa được nội suy), nhưng chuyển cảnh khi đó dễ bị báo nhầm.
 
 Việc của người gán nhãn:
