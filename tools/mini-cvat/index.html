@@ -1970,10 +1970,11 @@ async function plDetect(opt,prog,sub){ // sub (tuỳ chọn): {frames, nets, yun
  const full=mkCanvas(S.w,S.h),fg=full.getContext('2d',{willReadFrequently:true}),sm=mkCanvas(160,90),gsm=sm.getContext('2d',{willReadFrequently:true});
  let frames=[];if(sub)frames=sub.frames;else for(let f=0;f<S.n;f+=opt.stride)frames.push(f);
  const D=new Map(),cuts=new Set(),cmc=new Map(),cfg={yunet:sub?sub.yunet:opt.yunet,nets:sub?sub.nets:opt.nets,lo:opt.lo,sz:opt.sz,tiles:opt.tiles,longSide:opt.longSide};
- let prevN=null,nDet=0;const t0=performance.now();PL.seqWhy=null;const rdr=await plFrames(frames,opt);
- try{await plPump(pool,frames,prog,sub?sub.label:'Đang tìm mặt',async f=>{
+ let prevN=null,nDet=0;const t0=performance.now();PL.seqWhy=null;const iter=sub&&sub.readAll?sub.readAll:frames,want=new Set(frames),rdr=await plFrames(iter,opt);
+ try{await plPump(pool,iter,prog,sub?sub.label:'Đang tìm mặt',async f=>{
   await rdr.draw(f,fg);
   gsm.drawImage(full,0,0,160,90);{const g=grayOf(gsm.getImageData(0,0,160,90)),[m,sd]=meanStd(g),nm=g.map(v=>(v-m)/(sd+1e-6));if(prevN&&(!sub||sub.cuts)){const m=plShift(prevN,nm);if(m.ncc<0.5)cuts.add(f);else cmc.set(f,[m.dx*S.w/160,m.dy*S.h/90])}prevN=nm}
+  if(!want.has(f))return null;
   const id=fg.getImageData(0,0,S.w,S.h);
   return {msg:{t:'det',w:S.w,h:S.h,buf:id.data.buffer,cfg},tr:[id.data.buffer],done:r=>{
    const out=[];
@@ -2023,24 +2024,20 @@ async function plDetectRois(opt,prog,rois,o){ // dò trên vùng cắt quanh m�
 /* ---------- CHẾ ĐỘ NHANH: dò cả khung mỗi K frame, ở giữa chỉ dò quanh mặt đã biết ----------
    Lượt 1: bộ dò đã chọn chạy cả khung ở mỗi K frame quét (frame mốc). Ghép track tạm qua các frame mốc.
    Lượt 2: ở các frame giữa, chỉ dò trên vùng cắt nhỏ (3× cỡ mặt, phóng cho mặt ~64 px) quanh vị trí nội suy của từng track, cộng K-1 frame trước lần thấy đầu
-   và sau lần thấy cuối. Chuyển cảnh thấy ở frame mốc được dò lại từng frame trong khoảng đó để đặt đúng vị trí (không có chỗ đổi đột ngột thì bỏ).
+   và sau lần thấy cuối. Lượt 1 vẫn đọc mọi frame (chỉ để đo rung máy và tìm chuyển cảnh), nên vùng dò ở frame giữa được đặt sau khi bù rung.
    Mặt mới xuất hiện giữa hai frame mốc được bắt chậm tối đa K-1 frame; phần trước đó do vùng cắt quanh lần thấy đầu và bước theo dấu ảnh bù. */
 async function plDetectFast(opt,prog){
  const K=opt.fast,all=[];for(let f=0;f<S.n;f+=opt.stride)all.push(f);const keysF=all.filter((f,i)=>i%K===0),isKey=new Set(keysF),span=K*opt.stride;
- const R=await plDetect(opt,prog,{frames:keysF,nets:opt.nets,yunet:opt.yunet,stems:opt.stems,cuts:true,label:`Dò cả khung ở ${keysF.length}/${all.length} frame`});
+ const R=await plDetect(opt,prog,{frames:keysF,readAll:all,nets:opt.nets,yunet:opt.yunet,stems:opt.stems,cuts:true,label:`Dò cả khung ở ${keysF.length}/${all.length} frame`});
  const t0=performance.now(),o={...opt,lo:Math.min(opt.lo,0.3),hi:0.6,strict:false,stride:span,minLen:1,maxGap:Math.max(2*span,opt.maxGap),linkGap:Math.max(3*span,opt.linkGap)},{T}=plTrack(plFilter(R,o,null).D,keysF,R.cuts,o,R.cmc);
- const rois=[],put=(f,b)=>{if(f<0||f>=S.n||isKey.has(f)||f%opt.stride)return;if(rois.some(r=>r.f===f&&iou(r,b)>=0.7))return;rois.push({f,x:b.x,y:b.y,w:b.w,h:b.h})};
+ const cam=plCam(R.cmc),mv=(b,f0,f1)=>{const a=cam(f0),c=cam(f1);return {x:b.x+c[0]-a[0],y:b.y+c[1]-a[1],w:b.w,h:b.h}},rois=[],put=(f,b)=>{if(f<0||f>=S.n||isKey.has(f)||f%opt.stride)return;if(rois.some(r=>r.f===f&&iou(r,b)>=0.7))return;rois.push({f,x:b.x,y:b.y,w:b.w,h:b.h})};
  for(const t of T){const d=t.d,a0=d[0],e=d.at(-1);if(opt.strict&&!d.some(x=>x.s>=opt.hi))continue; // track chưa có box nào đủ chắc ở frame mốc thì không dò phóng to quanh nó (ảnh phóng to dễ làm vật giống mặt được điểm cao)
-  for(let f=a0.f-span+opt.stride;f<a0.f;f+=opt.stride)put(f,a0);for(let f=e.f+opt.stride;f<e.f+span;f+=opt.stride)put(f,e);
-  for(let i=0;i+1<d.length;i++){const a=d[i],b=d[i+1];for(let f=a.f+opt.stride;f<b.f;f+=opt.stride){const w=(f-a.f)/(b.f-a.f);put(f,{x:a.x+(b.x-a.x)*w,y:a.y+(b.y-a.y)*w,w:a.w+(b.w-a.w)*w,h:a.h+(b.h-a.h)*w})}}}
- for(const c of R.cuts)for(let f=Math.max(0,c-span);f<=c;f+=opt.stride)rois.push({f,cut:true});
+  for(let f=a0.f-span+opt.stride;f<a0.f;f+=opt.stride)put(f,mv(a0,a0.f,f));for(let f=e.f+opt.stride;f<e.f+span;f+=opt.stride)put(f,mv(e,e.f,f));
+  for(let i=0;i+1<d.length;i++){const a=d[i],b=mv(d[i+1],d[i+1].f,d[i].f);for(let f=a.f+opt.stride;f<d[i+1].f;f+=opt.stride){const w=(f-a.f)/(d[i+1].f-a.f);put(f,mv({x:a.x+(b.x-a.x)*w,y:a.y+(b.y-a.y)*w,w:a.w+(b.w-a.w)*w,h:a.h+(b.h-a.h)*w},a.f,f))}}} // nội suy trong toạ độ đã bù camera
  rois.sort((a,b)=>a.f-b.f||(b.cut?1:0)-(a.cut?1:0));
  const nR=rois.filter(r=>!r.cut).length,r2=rois.length?await plDetectRois(opt,prog,rois,{anchor:true,nets:opt.nets.slice(0,1),yunet:!opt.nets.length,label:`Dò quanh mặt ở ${nR} vùng (các frame giữa)`}):{D:new Map(),ncc:new Map(),sh:new Map()};
- let moved=0,dropped=0;for(const c of [...R.cuts]){let g=-1,mn=2;for(let f=c-span+opt.stride;f<=c;f+=opt.stride){const v=r2.ncc.get(f);if(v!==undefined&&v<mn){mn=v;g=f}}
-  if(g<0)continue;R.cuts.delete(c);if(mn<0.5){R.cuts.add(g);if(g!==c)moved++}else dropped++}
  const D=new Map();let add=0;for(const f of all){if(isKey.has(f))D.set(f,R.D.get(f)||[]);else{const L=(r2.D.get(f)||[]).map(b=>({...b,roi:true}));D.set(f,L);add+=L.length}}
- if(r2.sh.size){const C=new Map();for(const [f,v] of r2.sh)C.set(f,v);R.cmc=C}
- R.D=D;R.frames=all;R.nDet+=add;R.fast={K,keys:keysF.length,of:all.length,rois:nR,cutsDropped:dropped,sec:(performance.now()-t0)/1000};R.sec+=R.fast.sec;return R}
+ R.D=D;R.frames=all;R.nDet+=add;R.fast={K,keys:keysF.length,of:all.length,rois:nR,sec:(performance.now()-t0)/1000};R.sec+=R.fast.sec;return R}
 async function plDetectCasc(opt,prog){
  const R=opt.fast>1?await plDetectFast(opt,prog):await plDetect(opt,prog);if(!opt.heavy)return R;
  const t0=performance.now(),K=Math.max(1,Math.round(S.fps/3/opt.stride)),per=R.frames.filter((f,i)=>i%K===0);
@@ -2059,9 +2056,12 @@ const plKey=opt=>[S.name,S.n,S.w,S.h,opt.yunet,opt.nets.join('+'),opt.heavy||'',
 async function plDetectCached(opt,prog){ // dùng lại kết quả dò nếu cùng video + bộ dò + cỡ vào + bước quét, và ngưỡng cũ không cao hơn
  const key=plKey(opt);if(PL.cache&&PL.cache.key===key&&PL.cache.R.lo<=opt.lo){prog('Dùng lại kết quả dò lần trước (chỉ ghép track lại)…',1);return {...PL.cache.R,sec:0,reused:true}}
  const R=await plDetectCasc(opt,prog);PL.cache={key,R};return R}
+function plCam(cmc){ // f -> độ dịch camera cộng dồn tới frame f
+ const K=cmc?[...cmc.keys()].sort((a,b)=>a-b):[],X=[],Y=[];let x=0,y=0;for(const k of K){x+=cmc.get(k)[0];y+=cmc.get(k)[1];X.push(x);Y.push(y)}
+ return f=>{let lo=0,hi=K.length-1,i=-1;while(lo<=hi){const m=(lo+hi)>>1;if(K[m]<=f){i=m;lo=m+1}else hi=m-1}return i<0?[0,0]:[X[i],Y[i]]}}
 function plTrack(D,frames,cuts,opt,cmc){
- const done=[],act=[],cam=new Map();{let cx=0,cy=0;for(const f of frames){const v=cmc&&cmc.get(f);if(v){cx+=v[0];cy+=v[1]}cam.set(f,[cx,cy])}}
- const Wd=d=>{const c=cam.get(d.f)||[0,0];return {x:d.x-c[0],y:d.y-c[1],w:d.w,h:d.h}}; // toạ độ đã bù chuyển động camera
+ const done=[],act=[],cam=plCam(cmc);
+ const Wd=d=>{const c=cam(d.f);return {x:d.x-c[0],y:d.y-c[1],w:d.w,h:d.h}}; // toạ độ đã bù chuyển động camera
  const pred=(t,f)=>{const a=Wd(t.d.at(-1));if(t.d.length<2)return a;const n=Math.min(t.d.length,5),b=Wd(t.d.at(-n)),dt=Math.max(1,t.d.at(-1).f-t.d.at(-n).f),k=Math.min(f-t.d.at(-1).f,3*opt.stride);
   return {x:a.x+(a.x+a.w/2-b.x-b.w/2)/dt*k,y:a.y+(a.y+a.h/2-b.y-b.h/2)/dt*k,w:a.w,h:a.h}}; // vận tốc trung bình trên tối đa 5 lần thấy gần nhất
  const near=(p,d)=>{const r=d.w/p.w;if(r<0.67||r>1.5)return 0;const m=Math.max(p.w,p.h),dc=Math.hypot(p.x+p.w/2-d.x-d.w/2,p.y+p.h/2-d.y-d.h/2);return dc<0.75*m?0.5*(1-dc/(0.75*m)):0};
