@@ -1930,19 +1930,28 @@ async function plDetect(opt,prog){
  const pool=PL.pool=new DetPool();await pool.init(opt.stems,prog,opt.threads);
  const full=mkCanvas(S.w,S.h),fg=full.getContext('2d',{willReadFrequently:true}),sm=mkCanvas(160,90),gsm=sm.getContext('2d',{willReadFrequently:true});
  const frames=[];for(let f=0;f<S.n;f+=opt.stride)frames.push(f);
- const keep=opt.mode==='add'?gtData(opt.label):null,D=new Map(),cuts=new Set(),cfg={yunet:opt.yunet,nets:opt.nets,lo:opt.lo,sz:opt.sz,tiles:opt.tiles,longSide:opt.longSide};
- let prevN=null,nDet=0;const t0=performance.now(),R0={drop:{}};
+ const D=new Map(),cuts=new Set(),cfg={yunet:opt.yunet,nets:opt.nets,lo:opt.lo,sz:opt.sz,tiles:opt.tiles,longSide:opt.longSide};
+ let prevN=null,nDet=0;const t0=performance.now();
  await plPump(pool,frames,prog,'Đang tìm mặt',async f=>{
   await src.seek(f);fg.drawImage(src.image,0,0,S.w,S.h);
   gsm.drawImage(src.image,0,0,160,90);{const g=grayOf(gsm.getImageData(0,0,160,90)),[m,sd]=meanStd(g),nm=g.map(v=>(v-m)/(sd+1e-6));if(prevN){let c=0;for(let i=0;i<g.length;i++)c+=nm[i]*prevN[i];if(c/g.length<0.5)cuts.add(f)}prevN=nm}
   const id=fg.getImageData(0,0,S.w,S.h);
   return {msg:{t:'det',w:S.w,h:S.h,buf:id.data.buffer,cfg},tr:[id.data.buffer],done:r=>{
-   const G=keep?(keep.F.get(f)||[]).map(i=>keep.rows[i]):[],out=[];
+   const out=[];
    for(const d of r.dets){const x0=clamp(d.x,0,S.w),y0=clamp(d.y,0,S.h),x1=clamp(d.x+d.w,0,S.w),y1=clamp(d.y+d.h,0,S.h);if(x1-x0<3||y1-y0<3)continue;
-    const b={f,x:x0,y:y0,w:x1-x0,h:y1-y0,s:d.s,lm:d.lm,n:d.n||1,sh:sharp64(Float32Array.from(d.g))};if(G.some(g=>iou(b,g)>=0.3))continue;
-    if(opt.strict){const why=plBadBox(b,opt);if(why){R0.drop[why]=(R0.drop[why]||0)+1;continue}}out.push(b)}
+    out.push({f,x:x0,y:y0,w:x1-x0,h:y1-y0,s:d.s,lm:d.lm,n:d.n||1,sh:sharp64(Float32Array.from(d.g))})}
    D.set(f,out);nDet+=out.length}}});
- return {D,frames,cuts,nDet,drop:R0.drop,sec:(performance.now()-t0)/1000}}
+ return {D,frames,cuts,nDet,lo:opt.lo,sec:(performance.now()-t0)/1000}}
+/* lọc box theo ngưỡng / lọc chặt / nhãn đã có. Trả về bản sao, không sửa kết quả dò (để dùng lại cho nhiều cấu hình) */
+function plFilter(R,opt,keep){const D=new Map(),drop={};let nDet=0;
+ for(const [f,L] of R.D){const G=keep?(keep.F.get(f)||[]).map(i=>keep.rows[i]):[],out=[];
+  for(const b of L){if(b.s<opt.lo)continue;if(G.length&&G.some(g=>iou(b,g)>=0.3))continue;if(opt.strict){const why=plBadBox(b,opt);if(why){drop[why]=(drop[why]||0)+1;continue}}out.push({...b})}
+  D.set(f,out);nDet+=out.length}
+ return {...R,D,nDet,drop}}
+const plKey=opt=>[S.name,S.n,S.w,S.h,opt.yunet,opt.nets.join('+'),opt.sz,opt.tiles,opt.stride].join('|');
+async function plDetectCached(opt,prog){ // dùng lại kết quả dò nếu cùng video + bộ dò + cỡ vào + bước quét, và ngưỡng cũ không cao hơn
+ const key=plKey(opt);if(PL.cache&&PL.cache.key===key&&PL.cache.R.lo<=opt.lo){prog('Dùng lại kết quả dò lần trước (chỉ ghép track lại)…',1);return {...PL.cache.R,sec:0,reused:true}}
+ const R=await plDetect(opt,prog);PL.cache={key,R};return R}
 function plTrack(D,frames,cuts,opt){
  const done=[],act=[];
  const pred=(t,f)=>{const a=t.d.at(-1);if(t.d.length<2)return a;const b=t.d.at(-2),k=Math.min(f-a.f,3*opt.stride)/Math.max(1,a.f-b.f);
@@ -1994,7 +2003,8 @@ function plReidMerge(T,opt){
  return {mode:opt.reid,emb:G.length,tracks:T.length,merged,events,sugg}}
 async function plLink(R,opt,prog){
  const {T,links,weak}=plTrack(R.D,R.frames,R.cuts,opt);T.forEach((t,i)=>t.d.forEach(d=>{d.pt=i}));R.T=T;R.links=links;R.weak=weak;R.reid=null;
- if(opt.reid==='off'||T.length<2||!PL.pool)return;
+ if(opt.reid==='off'||T.length<2)return;
+ if(!PL.pool){PL.pool=new DetPool();await PL.pool.init(['w600k_mbf'],prog,opt.threads)}
  const pick=t=>{const ok=d=>d.s>=Math.max(0.5,opt.hi-0.1)&&Math.min(d.w,d.h)>=opt.reidMinPx&&d.sh>=opt.blur2&&plPose(d)<opt.reidPose;
   const c=t.d.filter(ok).sort((a,b)=>b.s*Math.min(b.w,b.h)-a.s*Math.min(a.w,a.h)),sp=Math.max(3,Math.floor(t.d.length/8)),o=[];
   for(const d of c){if(o.length>=5)break;if(o.every(x=>Math.abs(x.f-d.f)>=sp))o.push(d)}return o};
@@ -2030,9 +2040,9 @@ function plBuild(R,opt){
  for(const s of RE?.sugg||[]){if(!idOf.has(s.a)||!idOf.has(s.b))continue;const [x,y]=s.a.d[0].f<=s.b.d[0].f?[s.a,s.b]:[s.b,s.a];
   add(y.d[0].f,idOf.get(y),'Có thể cùng người',`Khuôn mặt giống #${idOf.get(x)} (độ giống ${s.s.toFixed(2)}, hai track không xuất hiện cùng lúc). Nếu cùng một người: chọn một track rồi bấm J để gộp.`)}
  issues.sort((a,b)=>a.f-b.f||a.id-b.id);
- return {tracks:out,issues,links,nBox,nIgn,drop:R.drop||{},weak:R.weak||0,cuts:[...R.cuts],nDet:R.nDet,sec:R.sec,frames:R.frames.length,opt,detName:opt.detName||'YuNet',reid:RE?{mode:RE.mode,emb:RE.emb,merged:RE.merged,sugg:RE.sugg.length}:null,when:new Date().toLocaleString()}}
+ return {tracks:out,issues,links,nBox,nIgn,drop:R.drop||{},weak:R.weak||0,reused:!!R.reused,cuts:[...R.cuts],nDet:R.nDet,sec:R.sec,frames:R.frames.length,opt,detName:opt.detName||'YuNet',reid:RE?{mode:RE.mode,emb:RE.emb,merged:RE.merged,sugg:RE.sugg.length}:null,when:new Date().toLocaleString()}}
 function renderPL(r){const kp=(v,l)=>`<div><b>${v}</b><span>${l}</span></div>`,kinds=[...new Set(r.issues.map(i=>i.kind))];
- let h=`<div class="evk">${kp(r.tracks.length,'track mặt đã tạo')}${kp(r.nBox,'mặt-frame')}${kp(r.nIgn,'track mặt nhỏ (Ignore)')}${kp(r.links,'đoạn đứt đã nối')}${r.reid?kp(r.reid.merged,'lần nối bằng khuôn mặt (ReID)'):''}${r.opt.strict?kp(Object.values(r.drop).reduce((a,b)=>a+b,0)+' / '+r.weak,'box / track yếu đã loại'):''}${kp(r.cuts.length,'chuyển cảnh')}${kp(r.issues.length,'điểm cần xem')}${kp(Math.round(r.sec)+' s',`${r.frames} frame đã quét`)}</div>
+ let h=`<div class="evk">${kp(r.tracks.length,'track mặt đã tạo')}${kp(r.nBox,'mặt-frame')}${kp(r.nIgn,'track mặt nhỏ (Ignore)')}${kp(r.links,'đoạn đứt đã nối')}${r.reid?kp(r.reid.merged,'lần nối bằng khuôn mặt (ReID)'):''}${r.opt.strict?kp(Object.values(r.drop).reduce((a,b)=>a+b,0)+' / '+r.weak,'box / track yếu đã loại'):''}${kp(r.cuts.length,'chuyển cảnh')}${kp(r.issues.length,'điểm cần xem')}${kp(r.reused?'dùng lại':Math.round(r.sec)+' s',`${r.frames} frame đã quét`)}</div>
  <div class="gtbox"><b>Việc còn lại của bạn</b><ul>
   <li>Bộ dò: <b>${esc(r.detName)}</b>${r.reid?` · ReID: ${r.reid.emb} track có khuôn mặt đủ rõ để so, ${r.reid.merged} lần tự nối, ${r.reid.sugg} gợi ý cùng người`:''}.</li>
   <li>Bấm <kbd>]</kbd> để đi lần lượt qua ${r.issues.length} điểm cần xem (${kinds.map(k=>`${esc(k)}: ${r.issues.filter(i=>i.kind===k).length}`).join(' · ')||'không có'}). Track sai: <kbd>Del</kbd>. Hai track cùng một người: chọn một track rồi <kbd>J</kbd>.</li>
@@ -2045,9 +2055,56 @@ function wirePL(){const o=$('#plOut');if(!o)return;o.querySelectorAll('[data-li]
 const PL_DETS={'sc500+yu':{label:'SCRFD-500M + YuNet (khuyên dùng)',yunet:true,nets:['det_500m']},'sc10+yu':{label:'SCRFD-10G + YuNet (chính xác nhất, chậm)',yunet:true,nets:['det_10g']},'sc10':{label:'SCRFD-10G',yunet:false,nets:['det_10g']},'sc500':{label:'SCRFD-500M (nhanh)',yunet:false,nets:['det_500m']},'yu':{label:'YuNet (có sẵn, không cần tải)',yunet:true,nets:[]}};
 function plDetOpt(){const v=$('#plDet').value,m=PL_DETS[v],reid=$('#plReid').value;
  return {det:v,detName:m.label.replace(/ \(.*\)$/,''),yunet:m.yunet,nets:m.nets,sz:+$('#plSz').value||960,reid,reidMerge:0.5,reidSuggest:0.32,reidMinPx:32,reidPose:0.45,threads:Math.max(0,Math.round(+$('#plThr').value||0)),stems:[...m.nets,...(reid!=='off'?['w600k_mbf']:[])]}}
+function plReadOpt(){const lo=clamp(+$('#plLo').value||0.3,0.1,0.9),stride=clamp(Math.round(+$('#plStride').value)||1,1,30);
+  const opt={stride,lo,hi:Math.max(lo,clamp(+$('#plHi').value||0.6,0.2,0.95)),tiles:$('#plTiles').checked,strict:$('#plStrict').checked,mode:$('#plMode').value,minPx:Math.max(0,+$('#plMin').value||0),longSide:1280,blur1:60,blur2:25,
+   maxGap:Math.max(2*stride,Math.round(S.fps*0.4)),linkGap:Math.max(3*stride,Math.round(S.fps*1.5)),minLen:3,gapWarn:Math.max(4,Math.round(S.fps/5))};
+  Object.assign(opt,plDetOpt());
+  Object.assign(opt,window.PL_DEBUG||{}); // móc gỡ lỗi: window.PL_DEBUG={maxGap:1,linkGap:0,debug:true}
+  let lab=S.labels.find(l=>/^(face|mặt|mat)$/i.test(l.name));if(!lab){lab={id:S.nextLabel++,name:'face',color:PALETTE[S.labels.length%PALETTE.length]};S.labels.push(lab)}opt.label=lab.id;
+ return opt}
+function plSave(o){try{localStorage.setItem('mcvat.plopt',JSON.stringify({det:o.det,sz:o.sz,reid:o.reid,threads:o.threads,stride:o.stride,lo:o.lo,hi:o.hi,tiles:o.tiles,mode:o.mode,minPx:o.minPx,strict:o.strict}))}catch(e){}}
+function plLoad(){try{return JSON.parse(localStorage.getItem('mcvat.plopt')||'null')}catch(e){return null}}
+/* ---------- DÒ NGƯỠNG THEO GT ----------
+   Dò mặt một lần với ngưỡng rất thấp, rồi thử nhiều bộ (điểm thấp, điểm chắc, lọc chặt): ghép track, nội suy như khi gán thật,
+   so với GT đang mở theo từng frame (IoU ≥ 0,4). Không đổi nhãn. ReID không nằm trong lưới vì cần nhúng mặt (chậm). */
+function plGTRef(label){const g=gtData(label),byId=new Map(S.tracks.map(t=>[t.id,t])),F=new Map();
+ for(const r of g.rows){const t=byId.get(r.id),a=t?attrAt(t,r.f):PV_DEF;if(!F.has(r.f))F.set(r.f,[]);F.get(r.f).push({...r,ign:!!a.ignore})}
+ return {F,n:g.rows.filter(r=>!(byId.get(r.id)&&attrAt(byId.get(r.id),r.f).ignore)).length,ids:new Set(g.rows.map(r=>r.id))}}
+function plPredBoxes(T,stride){const F=new Map(),put=(f,b)=>{if(!F.has(f))F.set(f,[]);F.get(f).push(b)};
+ T.forEach((t,ti)=>{const d=t.d;for(let i=0;i<d.length;i++){const a=d[i],b=d[i+1],same=b&&b.pt===a.pt,end=same?b.f:Math.min(a.f+stride,S.n);
+  for(let f=a.f;f<end;f++){const r=same?(f-a.f)/(b.f-a.f):0,q=same?b:a;put(f,{t:ti,x:a.x+(q.x-a.x)*r,y:a.y+(q.y-a.y)*r,w:a.w+(q.w-a.w)*r,h:a.h+(q.h-a.h)*r})}}});
+ return F}
+function plScore(T,ref,stride){const P=plPredBoxes(T,stride),hit=new Array(T.length).fill(0),tot=new Array(T.length).fill(0),pairs=new Map();let TP=0,FP=0,FN=0;
+ const fs=new Set([...P.keys(),...ref.F.keys()]);
+ for(const f of fs){const p=P.get(f)||[],g=ref.F.get(f)||[],M=[];p.forEach(x=>tot[x.t]++);
+  p.forEach((x,i)=>g.forEach((y,j)=>{const o=iou(x,y);if(o>=0.4)M.push([o,i,j])}));M.sort((a,b)=>b[0]-a[0]);const up=new Set(),ug=new Set();
+  for(const [,i,j] of M){if(up.has(i)||ug.has(j))continue;up.add(i);ug.add(j);hit[p[i].t]++;if(g[j].ign)continue;TP++;const k=g[j].id;if(!pairs.has(k))pairs.set(k,new Map());const m=pairs.get(k);m.set(p[i].t,(m.get(p[i].t)||0)+1)}
+  p.forEach((x,i)=>{if(!up.has(i))FP++});g.forEach((y,j)=>{if(!ug.has(j)&&!y.ign)FN++})}
+ let frag=0;for(const m of pairs.values())frag+=Math.max(0,[...m.values()].filter(v=>v>=3).length-1);
+ const junk=tot.filter((v,i)=>v>0&&hit[i]/v<0.3).length,R=TP/Math.max(1,TP+FN),Pr=TP/Math.max(1,TP+FP);
+ return {R,P:Pr,F1:2*R*Pr/Math.max(1e-9,R+Pr),F2:5*R*Pr/Math.max(1e-9,4*Pr+R),junk,frag,nT:T.length,FN,FP}}
+async function plTune(prog){
+ const base=plReadOpt(),ref=plGTRef(base.label);if(!ref.n)throw new Error('Chưa có GT: hãy Nhập file GT (nhãn face) cho video này trước');
+ const LO=[0.25,0.3,0.35,0.4,0.5,0.6],HI=[0.5,0.6,0.65,0.7,0.8];
+ const R0=await plDetectCached({...base,lo:LO[0]},prog);prog('Đang thử các bộ ngưỡng…',1);
+ const rows=[];for(const strict of [true,false])for(const lo of LO)for(const hi of HI){if(hi<lo)continue;
+  const o={...base,lo,hi,strict},R=plFilter(R0,o,null),{T}=plTrack(R.D,R.frames,R.cuts,o);T.forEach((t,i)=>t.d.forEach(d=>{d.pt=i}));
+  rows.push({lo,hi,strict,...plScore(T,ref,o.stride)});await new Promise(r=>setTimeout(r,0))}
+ const cur={lo:base.lo,hi:base.hi,strict:base.strict};let curRow=rows.find(r=>r.lo===cur.lo&&r.hi===cur.hi&&r.strict===cur.strict);
+ if(!curRow&&base.lo>=LO[0]){const R=plFilter(R0,base,null),{T}=plTrack(R.D,R.frames,R.cuts,base);T.forEach((t,i)=>t.d.forEach(d=>{d.pt=i}));curRow={...cur,...plScore(T,ref,base.stride)}}
+ return {rows,cur:curRow,nGT:ref.n,nTrackGT:ref.ids.size,det:base.detName,frames:R0.frames.length,sec:R0.sec,reused:R0.reused}}
+function renderTune(r,pri){const key=pri==='bal'?'F1':'F2',rs=[...r.rows].sort((a,b)=>Math.round((b[key]-a[key])*1000)||a.junk-b.junk||a.frag-b.frag||(b.strict-a.strict)||b.lo-a.lo||b.hi-a.hi),pc=v=>(v*100).toFixed(1)+'%';
+ const row=(x,tag)=>`<tr${tag?' style="font-weight:600"':''}><td>${tag||''}</td><td>${x.lo}</td><td>${x.hi}</td><td>${x.strict?'bật':'tắt'}</td><td>${pc(x.R)}</td><td>${pc(x.P)}</td><td>${x.junk}</td><td>${x.frag}</td><td>${x.nT}</td><td>${(x[key]*100).toFixed(1)}</td><td>${tag==='hiện tại'?'':`<button class="btn" data-use="${x.lo},${x.hi},${x.strict?1:0}">Dùng</button>`}</td></tr>`;
+ return `<div class="gtbox"><b>Dò ngưỡng theo GT</b> · bộ dò ${esc(r.det)} · ${r.frames} frame (${r.reused?'dùng lại kết quả dò':Math.round(r.sec)+' s dò'}) · GT: ${r.nTrackGT} track, ${r.nGT} mặt-frame (không tính Ignore).
+ <div class="mut">Phát hiện = tỉ lệ mặt GT có box máy (IoU ≥ 0,4). Đúng = tỉ lệ box máy trúng mặt GT. Track rác = track máy có &lt;30% frame trúng GT. Đứt ID = số lần một người GT bị chia thành nhiều track. Xếp theo ${key==='F2'?'F2 (ưu tiên ít sót, hợp với che mặt)':'F1 (cân bằng)'}. Chưa tính ReID.</div>
+ <label>Ưu tiên <select class="btn" id="tunePri"><option value="rec"${key==='F2'?' selected':''}>ít sót mặt (F2)</option><option value="bal"${key==='F1'?' selected':''}>cân bằng (F1)</option></select></label></div>
+ <div class="gtt"><table><tr><th></th><th>Điểm thấp</th><th>Điểm chắc</th><th>Lọc chặt</th><th>Phát hiện</th><th>Đúng</th><th>Track rác</th><th>Đứt ID</th><th>Số track</th><th>${key}</th><th></th></tr>
+ ${r.cur?row(r.cur,'hiện tại'):''}${rs.slice(0,12).map((x,i)=>row(x,i===0?'tốt nhất':'')).join('')}</table></div>`}
+function wireTune(){const o=$('#plOut');if(!o||!PL.tune)return;const sp=$('#tunePri');if(sp)sp.onchange=()=>{PL.tunePri=sp.value;o.innerHTML=renderTune(PL.tune,PL.tunePri);wireTune()};
+ o.querySelectorAll('[data-use]').forEach(b=>b.onclick=()=>{const [lo,hi,st]=b.dataset.use.split(',');$('#plLo').value=lo;$('#plHi').value=hi;$('#plStrict').checked=st==='1';plSave(plReadOpt());toast(`Đã chọn điểm thấp ${lo}, điểm chắc ${hi}, lọc chặt ${st==='1'?'bật':'tắt'} (được nhớ cho lần sau). Bấm Chạy để gán nhãn.`,5000)})}
 function showPL(){
  if(!src)return toast('Hãy mở video trước');if(playing)togglePlay();
- const o={det:'sc500+yu',sz:960,reid:'merge',threads:0,...(PL.opt||{stride:1,lo:0.4,hi:0.65,tiles:false,mode:'add',minPx:14,longSide:1280,strict:true})};
+ const o={det:'sc500+yu',sz:960,reid:'merge',threads:0,...(PL.opt||plLoad()||{stride:1,lo:0.4,hi:0.65,tiles:false,mode:'add',minPx:14,longSide:1280,strict:true})};
  openModal('Tự gán nhãn mặt',`<div class="gtcfg"><div class="mdrow" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
   <label title="1 = mọi frame (nên dùng cho GT). Lớn hơn thì nhanh hơn, các frame giữa được nội suy">Quét mỗi <input class="num" id="plStride" type="number" min="1" max="30" value="${o.stride}"> frame</label>
   <label title="Box có điểm từ mức này trở lên đều được giữ lại để ghép track. Thấp = ít sót, nhiều box sai cần xoá">Điểm thấp ≥ <input class="num" id="plLo" type="number" step="0.05" min="0.1" max="0.9" value="${o.lo}"></label>
@@ -2061,22 +2118,23 @@ function showPL(){
   <label title="Số Web Worker chạy song song. 0 = tự chọn theo số nhân CPU">Luồng <input class="num" id="plThr" type="number" min="0" max="12" value="${o.threads}"></label>
   <button class="btn" id="plModelBtn" title="Chọn det_500m.onnx, det_10g.onnx, w600k_mbf.onnx nếu máy không tải được tự động">Nạp model từ file…</button><input type="file" id="plModelIn" accept=".onnx" multiple hidden>
   <label>Nhãn đã có <select class="btn" id="plMode"><option value="add"${o.mode==='add'?' selected':''}>giữ, chỉ thêm mặt chưa có box</option><option value="replace"${o.mode==='replace'?' selected':''}>xoá track mặt cũ rồi gán lại</option></select></label>
-  <button class="btn primary" id="plRun">Chạy</button><button class="btn" id="plStop" hidden>Dừng</button></div>
+  <button class="btn primary" id="plRun">Chạy</button><button class="btn" id="plTuneBtn" title="Cần mở sẵn GT (nhãn face) của video này. Dò một lần rồi thử nhiều bộ ngưỡng, so với GT, gợi ý bộ tốt nhất. Không đổi nhãn">Dò ngưỡng theo GT</button><button class="btn" id="plStop" hidden>Dừng</button></div>
   <div class="note">Máy tìm mặt (SCRFD + YuNet) ở mọi frame, ghép track kiểu ByteTrack (điểm cao ghép trước, điểm thấp ghép sau), nối các đoạn đứt bằng khuôn mặt ArcFace, tự điền cắt mép / Ignore / độ mờ / góc mặt, rồi xếp hàng những chỗ cần bạn xem. Mọi thứ chạy trong trình duyệt, video không rời khỏi máy. Lần đầu cần model SCRFD/ArcFace (~16–33 MB, tự tải nếu mở bằng <code>python scripts/serve.py</code>). Chọn "YuNet" và ReID "tắt" thì không cần tải gì.</div>
   <div id="plProg" hidden><div class="pbar"><i></i></div><span class="mut" id="plProgTxt"></span></div></div>
   <div id="plOut">${PL.res?renderPL(PL.res):''}</div>`);
  $('#modal').classList.add('wide');wirePL();$('#plStop').onclick=()=>{PL.cancel=true};
+ if(PL.tune&&!PL.res){$('#plOut').innerHTML=renderTune(PL.tune,PL.tunePri);wireTune()}
+ $('#plTuneBtn').onclick=async()=>{if(PL.running)return;PL.running=true;PL.cancel=false;$('#plRun').disabled=$('#plTuneBtn').disabled=true;$('#plStop').hidden=false;$('#plProg').hidden=false;const keepF=S.frame;
+  const prog=(m,p)=>{const t=$('#plProgTxt');if(t)t.textContent=m;const b=document.querySelector('#plProg .pbar i');if(b&&p!=null)b.style.width=(p*100).toFixed(1)+'%'};
+  try{PL.tune=await plTune(prog);if($('#plOut')){$('#plOut').innerHTML=renderTune(PL.tune,PL.tunePri);wireTune()}}
+  catch(e){toast(e.message==='Đã hủy'?'Đã dừng':'Lỗi khi dò ngưỡng: '+e.message,9000)}
+  finally{PL.running=false;if(PL.pool){PL.pool.close();PL.pool=null}if($('#plRun')){$('#plRun').disabled=$('#plTuneBtn').disabled=false;$('#plStop').hidden=true;$('#plProg').hidden=true}goFrame(keepF)}};
  $('#plModelBtn').onclick=()=>$('#plModelIn').click();
  $('#plModelIn').onchange=async e=>{let n=0;for(const f of e.target.files){const st=f.name.replace(/\.onnx$/i,'');if(MODELS[st]){MODEL.bytes.set(st,new Uint8Array(await f.arrayBuffer()));n++}}e.target.value='';toast(n?`Đã nạp ${n} model`:'Tên file phải là det_500m.onnx, det_10g.onnx hoặc w600k_mbf.onnx',4000)};
- $('#plRun').onclick=async()=>{if(PL.running)return;const lo=clamp(+$('#plLo').value||0.3,0.1,0.9),stride=clamp(Math.round(+$('#plStride').value)||1,1,30);
-  const opt={stride,lo,hi:Math.max(lo,clamp(+$('#plHi').value||0.6,0.2,0.95)),tiles:$('#plTiles').checked,strict:$('#plStrict').checked,mode:$('#plMode').value,minPx:Math.max(0,+$('#plMin').value||0),longSide:1280,blur1:60,blur2:25,
-   maxGap:Math.max(2*stride,Math.round(S.fps*0.4)),linkGap:Math.max(3*stride,Math.round(S.fps*1.5)),minLen:3,gapWarn:Math.max(4,Math.round(S.fps/5))};
-  Object.assign(opt,plDetOpt());
-  Object.assign(opt,window.PL_DEBUG||{}); // móc gỡ lỗi: window.PL_DEBUG={maxGap:1,linkGap:0,debug:true}
-  let lab=S.labels.find(l=>/^(face|mặt|mat)$/i.test(l.name));if(!lab){lab={id:S.nextLabel++,name:'face',color:PALETTE[S.labels.length%PALETTE.length]};S.labels.push(lab)}opt.label=lab.id;PL.opt=opt;
+ $('#plRun').onclick=async()=>{if(PL.running)return;const opt=plReadOpt();PL.opt=opt;plSave(opt);
   PL.running=true;PL.cancel=false;$('#plRun').disabled=true;$('#plStop').hidden=false;$('#plProg').hidden=false;const keepF=S.frame;
   const prog=(m,p)=>{const t=$('#plProgTxt');if(t)t.textContent=m;const b=document.querySelector('#plProg .pbar i');if(b&&p!=null)b.style.width=(p*100).toFixed(1)+'%'};
-  try{prog('Đang tải OpenCV.js (~10 MB)…',0);const R=await plDetect(opt,prog);await plLink(R,opt,prog);prog('Đang ghép track…',1);const res=plBuild(R,opt);
+  try{prog('Đang tải OpenCV.js (~10 MB)…',0);const R0=await plDetectCached(opt,prog),R=plFilter(R0,opt,opt.mode==='add'?gtData(opt.label):null);await plLink(R,opt,prog);prog('Đang ghép track…',1);const res=plBuild(R,opt);
    pushUndo();if(opt.mode==='replace')S.tracks=S.tracks.filter(t=>t.label!==opt.label);S.tracks.push(...res.tracks);PL.res=res;PV.chk=null;pvClear();GT.issues=res.issues;GT.cur=-1;GT.hl=null;sel=null;
    renderLabels();changed();renderGTSide();if($('#plOut')){$('#plOut').innerHTML=renderPL(res);wirePL()}toast(`Đã tạo ${res.tracks.length} track mặt · ${res.issues.length} điểm cần xem`,4000)}
   catch(e){toast(e.message==='Đã hủy'?'Đã dừng, chưa thay đổi nhãn':'Lỗi khi tự gán nhãn: '+e.message,9000)}
