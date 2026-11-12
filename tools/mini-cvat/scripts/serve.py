@@ -50,8 +50,14 @@ class H(SimpleHTTPRequestHandler):
         return super().do_GET()
 
     def log_message(self, fmt, *a):
-        if '/api/' in (a[0] if a else ''):
+        # chỉ in yêu cầu tải model; bỏ qua log thường (a[0] có thể không phải chuỗi, ví dụ HTTPStatus khi 404)
+        if a and '/api/' in str(a[0]):
             super().log_message(fmt, *a)
+
+    def log_error(self, fmt, *a):
+        if a and str(a[0]) == '404':
+            return  # ví dụ favicon.ico: không cần báo
+        super().log_error(fmt, *a)
 
 
 if __name__ == '__main__':
