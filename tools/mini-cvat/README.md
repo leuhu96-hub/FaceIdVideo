@@ -24,6 +24,7 @@ Mở thẳng `index.html` (double-click) vẫn chạy được phần gán nhãn
 | `lib/opencv.js` | OpenCV.js 4.10 (Apache 2.0), chỉ tải khi chạy nhóm C hoặc Box model |
 | `lib/yunet_model.js` | YuNet 2026may (MIT), nhúng dạng base64 |
 | `lib/md_worker.js` | Web Worker chạy YuNet (nút "Tự chạy YuNet") |
+| `lib/seqreader.js` | Tách gói MP4/WebM và giải mã tuần tự bằng WebCodecs cho Tự gán nhãn |
 | `lib/det_core.js`, `lib/det_worker.js` | Lõi + Web Worker của **Tự gán nhãn**: SCRFD, YuNet, ArcFace; nhiều worker chạy song song |
 | `models/` | SCRFD / ArcFace `.onnx` (tự tải, không đưa vào git) |
 | `sample/` | Video thử `c1.webm` (2 người, có cài sẵn lỗi GT) và nhãn `c1_gt.json` |
@@ -130,6 +131,8 @@ Nút **Tự gán nhãn** → **Chạy**. Mọi thứ chạy trong trình duyệt
 Chạy lại **Tự gán nhãn** trên cùng video với cùng bộ dò / cỡ vào / bước quét mà chỉ đổi ngưỡng thì máy dùng lại kết quả dò lần trước, chỉ mất vài giây.
 
 **Lọc chặt box lạ** (bật mặc định, ngưỡng mặc định điểm thấp 0,4 / điểm chắc 0,65): loại box có tỉ lệ khung phi lý, landmark ngoài box hoặc sai thứ tự mắt-mũi-miệng, box mà khi chạy hai bộ dò chỉ một bộ thấy và điểm thấp, và track không có ít nhất 2 box điểm cao. Báo cáo ghi số box và track đã loại. Nếu thấy mất mặt thật (mặt rất nhỏ, mờ), tắt lọc chặt hoặc hạ điểm thấp xuống 0,3, bù lại sẽ có thêm track rác cần xoá bằng `Del`.
+
+**Đọc frame**: Tự gán nhãn tự tách gói video (MP4: H.264, HEVC; WebM: VP8, VP9, H.264) và giải mã tuần tự bằng WebCodecs thay vì nhảy từng frame bằng `<video>`. Trên video 1080p thử nghiệm, mỗi frame đọc mất 13–30 ms thay vì 105–160 ms; frame đọc ra khớp từng điểm ảnh với frame `<video>` hiển thị, kể cả video có B-frame và video điện thoại quay dọc (góc xoay lấy từ file). Khi đọc thưa ("Quét mỗi N frame" lớn, bước ReID), bộ đọc nhảy qua keyframe. Codec khác (AV1…) hoặc trình duyệt không giải mã được (ví dụ HEVC trên máy không có phần cứng hỗ trợ) thì tự quay về cách nhảy frame; báo cáo ghi rõ đang dùng cách nào (`lib/seqreader.js`).
 
 Tốc độ: mỗi frame cần một lần chạy mỗi bộ dò. Trong môi trường thử (2 nhân, không GPU) ở 960×544, SCRFD-500M ≈ 0,8 s/frame, SCRFD-10G ≈ 13 s/frame, YuNet ≈ 0,6 s/frame trên một luồng. Chương trình mở nhiều Web Worker (mặc định số nhân − 1, tối đa 6, chỉnh ở ô **Luồng**) nên tốc độ tăng gần tuyến tính theo số nhân. Dùng "Quét mỗi N frame" lớn hơn 1 để nhanh hơn (các frame giữa được nội suy), nhưng chuyển cảnh khi đó dễ bị báo nhầm.
 
