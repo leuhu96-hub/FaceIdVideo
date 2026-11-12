@@ -26,6 +26,7 @@ Mở thẳng `index.html` (double-click) vẫn chạy được, nhưng Web Worke
 | `scripts/analyze_gt.py` | Phân tích GT đầy đủ, xuất báo cáo HTML + CSV + tham số gợi ý |
 | `scripts/eval_face_postproc.py` | Chạy YuNet, so sánh 9 biến thể post-processing với GT |
 | `scripts/make_test_video.py` | Tạo video thử có lỗi GT cài sẵn |
+| `scripts/eval_privacy.py` | Đo tỷ lệ lộ mặt của kết quả che so với GT mở rộng, một file hoặc cả folder |
 
 ## Định dạng hỗ trợ
 
@@ -39,6 +40,7 @@ Mở thẳng `index.html` (double-click) vẫn chạy được, nhưng Web Worke
 | JSON mảng bản ghi kiểu JSONL (`[{"sample_id":…,"object":[…]}]` hoặc `{"samples":[…]}`) | có | có | – |
 | MOT 1.1 (`frame,id,x,y,w,h,score[,10 landmark]`) | – | có | có |
 | YOLO | – | – | có |
+| JSONL che mặt (GT mở rộng) | có | – | có |
 
 Số frame trong công cụ đếm từ 0; file MOT đếm từ 1.
 
@@ -95,6 +97,73 @@ Kết quả có hai phần:
 
 Video mở từ Đánh giá folder **không tự lưu nhãn**, để không ghi đè nhãn bạn đã lưu cho video cùng tên. Sửa GT xong hãy **Xuất**.
 
+## Che mặt: gán nhãn mở rộng, kiểm tra chuẩn nhãn, đo tỷ lệ lộ mặt
+
+Dành cho bài toán "chọn một người, che mặt mọi người còn lại".
+
+### Gán nhãn
+
+Chọn một đối tượng, mục **Thuộc tính che mặt** hiện ở thanh bên:
+
+| Trường | Giá trị | Phím |
+| --- | --- | --- |
+| Person | số nguyên; mặt và đầu của cùng một người dùng chung. Mặc định = số `#` của track | – |
+| ★ Người được chọn | mặt người này không bị che; lưu ở mức video (`target_ids`) | `M` |
+| Độ mờ | rõ / mờ vừa / mờ nặng | `U` |
+| Bị che | không / một phần (<50%) / nặng (≥50%) | `C` |
+| Góc mặt | thẳng / nghiêng / ngang | `V` |
+| Nhận ra được | có / không chắc / không | `Y` |
+| Gián tiếp | mặt trong gương, màn hình, ảnh, poster | `G` |
+| Cắt ở mép | box bị cắt ở mép khung hình | `X` |
+| Ignore | mặt quá nhỏ hoặc quá mờ, không tính khi đánh giá | `I` |
+
+- Thuộc tính thay đổi theo thời gian: đổi ở frame nào thì có hiệu lực **từ frame đó trở đi** (tạo keyframe). Bật **Áp cho cả track** để đổi cho mọi frame.
+- Dùng hai nhãn: `face` cho mặt, `head` cho đầu không thấy mặt (quay lưng, cúi).
+- Thuộc tính khác mặc định hiện ngay trên tên box (`mờ1`, `che2`, `IGN`, `★`…).
+- **Xuất** → *Mini CVAT JSON* giữ đủ mọi thứ. *JSONL che mặt* là định dạng cho script và cho việc trao đổi:
+
+```
+{"meta":{"format":"mini-cvat-privacy-gt","video":"a.mp4","width":1920,"height":1080,"fps":30,"frame_count":300,"bbox":"xywh","frame_base":0,"target_ids":[3]}}
+{"sample_id":"a/frame-000000","object":[{"track_id":3,"person_id":3,"cls":"face","label":"face","bbox":[412,180,58,71],"blur":0,"occlusion":1,"pose":2,"indirect":false,"truncated":false,"identifiable":"yes","ignore":false}]}
+```
+
+### Chuẩn nhãn
+
+Nút **Chuẩn nhãn** soát GT theo quy tắc và đưa kết quả vào danh sách nghi vấn (`[` `]`):
+
+- track chưa gán thuộc tính nào; chưa chọn ★, hoặc ★ không có track mặt
+- mặt có cạnh ngắn dưới ngưỡng (mặc định 14 px) mà chưa Ignore và vẫn để "nhận ra được = có"
+- Ignore nhưng "không chắc" (không chắc thì phải tính như mặt thật); Ignore mặt lớn, rõ
+- box chạm mép khung mà thiếu cờ cắt mép, hoặc có cờ mà không chạm mép
+- một person có 2 mặt trực tiếp trong cùng frame; mặt nằm trong đầu của person khác
+- track mất nhãn vài frame rồi hiện lại
+
+Kèm bảng phân bố thuộc tính để xem bộ test đã phủ đủ tình huống chưa.
+
+### Đánh giá che mặt
+
+1. Mở video, **Nhập** GT.
+2. Ở **Box model**, **Nhập kết quả…** file vùng che của pipeline (MOT, JSONL, JSON theo frame). Mỗi box là một vùng bị che ở frame đó. Kiểm tra lựa chọn "frame đầu" trong hộp thoại: với box di chuyển chậm, công cụ có thể đoán lệch một frame.
+3. **Đánh giá che mặt** → **Tính**.
+
+Cách tính:
+
+- Mặt của người không được chọn bị coi là **lộ** khi các vùng che phủ dưới ngưỡng (mặc định 90%) diện tích box mặt GT. Đo theo độ phủ, không theo IoU: vùng che to hơn mặt không phải lỗi.
+- Mặt Ignore không tính là lộ, cũng không tính là che thừa.
+- Người được chọn bị coi là **che nhầm** khi vùng che phủ ≥ 50% mặt.
+- Vùng che đọc từ file gốc, không gộp NMS. **Nới box** dùng khi file là box thô chưa nới như lúc render; **Vùng che hình elip** dùng khi app che bằng elip nội tiếp box.
+
+Kết quả: tỷ lệ mặt-frame bị lộ, số đoạn lộ (frame liên tiếp của cùng track, cho hở 1 frame), đoạn dài nhất, vị trí đoạn (lúc vào khung / ra khung / giữa track), tỷ lệ lộ theo từng người và theo từng thuộc tính, tỷ lệ che nhầm ★, số vùng che không trúng ai. Bấm một đoạn để nhảy tới (phím `;` `'`); mặt lộ có viền đỏ, vạch đỏ ở mép trên timeline. **Tải kết quả** xuất `*_privacy_summary.json`, `*_privacy_events.csv`, `*_privacy_leaks.csv`.
+
+Chấm cả folder bằng script (chỉ cần Python, không cần thư viện ngoài), cùng công thức với công cụ:
+
+```
+python scripts/eval_privacy.py --gt a_privacy_gt.jsonl --pred a_masks.jsonl --out res
+python scripts/eval_privacy.py --gt-dir gt --pred-dir masks --out res --max-leak-rate 0
+```
+
+File ghép theo tên (bỏ đuôi `_privacy_gt`, `_gt`, `_masks`, `_pred`…). Ghi `privacy_summary.csv`, `privacy_events.csv`, `privacy_report.json` (có tổng gộp và tỷ lệ lộ theo thuộc tính của cả bộ). `--max-leak-rate` trả mã thoát 1 khi vượt ngưỡng, dùng được trong CI. Tuỳ chọn khác: `--cover`, `--tcover`, `--pad`, `--ellipse`, `--thr`, `--targets 3,5`, `--pred-fmt xyxy`, `--pred-offset 1`.
+
 ## Box model
 
 - **Chạy frame này**: YuNet trên frame hiện tại. **Tự chạy YuNet (tính trước)**: một bản video ẩn detect trước đầu phát nên box không trễ.
@@ -122,7 +191,7 @@ Model .onnx không có trong repo: YuNet và SFace tải ở [opencv_zoo](https:
 
 ## Phím tắt chính
 
-R vẽ box · F / D frame sau / trước (Shift: ±10) · O outside · K keyframe · B ẩn/hiện box model · `[` / `]` nghi vấn GT · `,` / `.` đoạn model sai · Ctrl+Z hoàn tác · `?` xem tất cả.
+R vẽ box · F / D frame sau / trước (Shift: ±10) · O outside · K keyframe · B ẩn/hiện box model · `[` / `]` nghi vấn GT · `,` / `.` đoạn model sai · `;` / `'` đoạn lộ mặt · U C V Y G X I thuộc tính che mặt · M người được chọn · Ctrl+Z hoàn tác · `?` xem tất cả.
 
 ## Lưu ý
 
