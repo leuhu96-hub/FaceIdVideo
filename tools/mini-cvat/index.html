@@ -1955,22 +1955,32 @@ async function plFrames(targets,opt){ // trả về {mode, draw(f,ctx) gọi đ�
   return {mode:`giải mã tuần tự (${r.codec}${r.rot?', xoay '+r.rot+'°':''})`,async draw(f,ctx){const {value,done}=await it.next();if(done||value.f!==f)throw new Error('Đọc frame lệch thứ tự');SeqReader.draw(ctx,value.frame,S.w,S.h,r.rot)},close(){it.return().catch(()=>{});r.close()}}}
  catch(e){console.warn('Không giải mã tuần tự được, dùng nhảy frame:',e.message);PL.seqWhy=e.message}}
  return {mode:'nhảy frame'+(PL.seqWhy?` (${PL.seqWhy})`:''),async draw(f,ctx){await src.seek(f);ctx.drawImage(src.image,0,0,S.w,S.h)},close(){}}}
+/* ---------- BÙ CHUYỂN ĐỘNG CAMERA ----------
+   So hai ảnh xám 160x90 đã chuẩn hoá: thử dịch ±16 px (bước 2 rồi tinh ±1), lấy độ dịch cho tương quan cao nhất.
+   Trả {ncc, dx, dy} (dx, dy theo pixel 160x90: nội dung frame sau = frame trước dịch đi (dx, dy)). Chuyển cảnh khi ncc < 0,5 kể cả sau khi bù. */
+function plShift(P,C){const W=160,H=90;
+ const corr=(dx,dy)=>{let s=0,n=0;const x0=Math.max(0,dx),x1=Math.min(W,W+dx),y0=Math.max(0,dy),y1=Math.min(H,H+dy);
+  for(let y=y0;y<y1;y++){const r=y*W,q=(y-dy)*W-dx;for(let x=x0;x<x1;x++){s+=C[r+x]*P[q+x];n++}}return n>W*H*0.4?s/n:-1};
+ let b={ncc:corr(0,0),dx:0,dy:0};
+ for(let dy=-16;dy<=16;dy+=2)for(let dx=-16;dx<=16;dx+=2){if(!dx&&!dy)continue;const c=corr(dx,dy);if(c>b.ncc)b={ncc:c,dx,dy}}
+ const b0={...b};for(let dy=b0.dy-1;dy<=b0.dy+1;dy++)for(let dx=b0.dx-1;dx<=b0.dx+1;dx++){if(dx===b0.dx&&dy===b0.dy)continue;const c=corr(dx,dy);if(c>b.ncc)b={ncc:c,dx,dy}}
+ return b}
 async function plDetect(opt,prog,sub){ // sub (tuỳ chọn): {frames, nets, yunet, stems, label} cho lượt chạy bổ sung
  if(PL.pool){PL.pool.close();PL.pool=null}const pool=PL.pool=new DetPool();await pool.init(sub?sub.stems:opt.stems,prog,opt.threads,opt.bk);
  const full=mkCanvas(S.w,S.h),fg=full.getContext('2d',{willReadFrequently:true}),sm=mkCanvas(160,90),gsm=sm.getContext('2d',{willReadFrequently:true});
  let frames=[];if(sub)frames=sub.frames;else for(let f=0;f<S.n;f+=opt.stride)frames.push(f);
- const D=new Map(),cuts=new Set(),cfg={yunet:sub?sub.yunet:opt.yunet,nets:sub?sub.nets:opt.nets,lo:opt.lo,sz:opt.sz,tiles:opt.tiles,longSide:opt.longSide};
+ const D=new Map(),cuts=new Set(),cmc=new Map(),cfg={yunet:sub?sub.yunet:opt.yunet,nets:sub?sub.nets:opt.nets,lo:opt.lo,sz:opt.sz,tiles:opt.tiles,longSide:opt.longSide};
  let prevN=null,nDet=0;const t0=performance.now();PL.seqWhy=null;const rdr=await plFrames(frames,opt);
  try{await plPump(pool,frames,prog,sub?sub.label:'Đang tìm mặt',async f=>{
   await rdr.draw(f,fg);
-  gsm.drawImage(full,0,0,160,90);{const g=grayOf(gsm.getImageData(0,0,160,90)),[m,sd]=meanStd(g),nm=g.map(v=>(v-m)/(sd+1e-6));if(prevN&&(!sub||sub.cuts)){let c=0;for(let i=0;i<g.length;i++)c+=nm[i]*prevN[i];if(c/g.length<0.5)cuts.add(f)}prevN=nm}
+  gsm.drawImage(full,0,0,160,90);{const g=grayOf(gsm.getImageData(0,0,160,90)),[m,sd]=meanStd(g),nm=g.map(v=>(v-m)/(sd+1e-6));if(prevN&&(!sub||sub.cuts)){const m=plShift(prevN,nm);if(m.ncc<0.5)cuts.add(f);else cmc.set(f,[m.dx*S.w/160,m.dy*S.h/90])}prevN=nm}
   const id=fg.getImageData(0,0,S.w,S.h);
   return {msg:{t:'det',w:S.w,h:S.h,buf:id.data.buffer,cfg},tr:[id.data.buffer],done:r=>{
    const out=[];
    for(const d of r.dets){const x0=clamp(d.x,0,S.w),y0=clamp(d.y,0,S.h),x1=clamp(d.x+d.w,0,S.w),y1=clamp(d.y+d.h,0,S.h);if(x1-x0<3||y1-y0<3)continue;
     out.push({f,x:x0,y:y0,w:x1-x0,h:y1-y0,s:d.s,lm:d.lm,n:d.n||1,sh:sharp64(Float32Array.from(d.g))})}
    D.set(f,out);nDet+=out.length}}})}finally{rdr.close()}
- return {D,frames,cuts,nDet,lo:opt.lo,reader:rdr.mode,backend:pool.bk,sec:(performance.now()-t0)/1000}}
+ return {D,frames,cuts,cmc,nDet,lo:opt.lo,reader:rdr.mode,backend:pool.bk,sec:(performance.now()-t0)/1000}}
 /* ---------- PHÂN TẦNG: SCRFD-10G chỉ chạy ở chỗ cần ----------
    Lượt 1: bộ dò nhẹ (SCRFD-500M + YuNet) ở mọi frame.
    Lượt 2: SCRFD-10G cả khung, cứ khoảng 1/3 giây một frame (tìm mặt mà bộ nhẹ không thấy).
@@ -1983,7 +1993,7 @@ function plFuseInto(D,D2){let add=0,agree=0;
    else{L.push({...h,n:1});add++}}}
  return {add,agree}}
 function plCascRois(R,opt,done){ // các vùng cần SCRFD-10G: [{f, x,y,w,h (box dự kiến)}], bỏ frame đã chạy cả khung
- const fr=R.frames,idx=new Map(fr.map((f,i)=>[f,i])),o={...opt,lo:0.3,hi:0.6,strict:false},{T}=plTrack(plFilter(R,o,null).D,fr,R.cuts,o),out=[];
+ const fr=R.frames,idx=new Map(fr.map((f,i)=>[f,i])),o={...opt,lo:0.3,hi:0.6,strict:false},{T}=plTrack(plFilter(R,o,null).D,fr,R.cuts,o,R.cmc),out=[];
  const put=(f,b)=>{if(f!=null&&!done.has(f))out.push({f,x:b.x,y:b.y,w:b.w,h:b.h})};
  for(const t of T){const d=t.d,i0=idx.get(d[0].f),i1=idx.get(d.at(-1).f);
   for(let k=1;k<=2;k++){if(i0-k>=0)put(fr[i0-k],d[0]);if(i1+k<fr.length)put(fr[i1+k],d.at(-1))}
@@ -1994,10 +2004,10 @@ async function plDetectRois(opt,prog,rois,o){ // dò trên vùng cắt quanh m�
  o=o||{nets:[opt.heavy],yunet:false,label:`SCRFD-10G ở ${rois.length} vùng quanh mặt`};
  if(PL.pool){PL.pool.close();PL.pool=null}const pool=PL.pool=new DetPool();await pool.init(o.nets,prog,opt.threads,opt.bk);
  const fs=[...new Set(rois.map(r=>r.f))],grayF=new Set(rois.filter(r=>r.cut).map(r=>r.f)),rdr=await plFrames(fs,opt),full=mkCanvas(S.w,S.h),fg=full.getContext('2d',{willReadFrequently:true}),cc=mkCanvas(8,8),cg=cc.getContext('2d',{willReadFrequently:true}),
-  sm=mkCanvas(160,90),gsm=sm.getContext('2d',{willReadFrequently:true}),D=new Map(),ncc=new Map();let last=-1,pg=null,pf=-1;
+  sm=mkCanvas(160,90),gsm=sm.getContext('2d',{willReadFrequently:true}),D=new Map(),ncc=new Map(),sh=new Map();let last=-1,pg=null,pf=-1;
  try{await plPump(pool,rois,prog,o.label,async r=>{
   if(r.f!==last){await rdr.draw(r.f,fg);last=r.f;
-   if(grayF.has(r.f)){gsm.drawImage(full,0,0,160,90);const g=grayOf(gsm.getImageData(0,0,160,90)),[m,sd]=meanStd(g),nm=g.map(v=>(v-m)/(sd+1e-6));if(pg&&pf===r.f-opt.stride){let c=0;for(let i=0;i<g.length;i++)c+=nm[i]*pg[i];ncc.set(r.f,c/g.length)}pg=nm;pf=r.f}}
+   if(grayF.has(r.f)){gsm.drawImage(full,0,0,160,90);const g=grayOf(gsm.getImageData(0,0,160,90)),[m,sd]=meanStd(g),nm=g.map(v=>(v-m)/(sd+1e-6));if(pg&&pf===r.f-opt.stride){const m=plShift(pg,nm);ncc.set(r.f,m.ncc);sh.set(r.f,[m.dx*S.w/160,m.dy*S.h/90])}pg=nm;pf=r.f}}
   if(r.cut)return null;
   const m=Math.max(r.w,r.h),side=Math.max(48,m*3),k=clamp(64/Math.max(8,m),1,4),x0=Math.max(0,Math.round(r.x+r.w/2-side/2)),y0=Math.max(0,Math.round(r.y+r.h/2-side/2)),
    cw0=Math.min(S.w-x0,Math.round(side)),ch0=Math.min(S.h-y0,Math.round(side));if(cw0<8||ch0<8)return null;
@@ -2009,7 +2019,7 @@ async function plDetectRois(opt,prog,rois,o){ // dò trên vùng cắt quanh m�
     b.w=Math.min(b.w,S.w-b.x);b.h=Math.min(b.h,S.h-b.y);if(b.w<3||b.h<3)continue;
     if(o.anchor){const q=Math.max(b.w,b.h)/m;if(q<0.5||q>2||Math.hypot(b.x+b.w/2-r.x-r.w/2,b.y+b.h/2-r.y-r.h/2)>m)continue} // chỉ nhận mặt ở đúng chỗ track dự kiến, không nhận vật khác trong vùng cắt
     if(!L.some(x=>iou(x,b)>=0.5))L.push(b)}}}})}finally{rdr.close()}
- return {D,ncc}}
+ return {D,ncc,sh}}
 /* ---------- CHẾ ĐỘ NHANH: dò cả khung mỗi K frame, ở giữa chỉ dò quanh mặt đã biết ----------
    Lượt 1: bộ dò đã chọn chạy cả khung ở mỗi K frame quét (frame mốc). Ghép track tạm qua các frame mốc.
    Lượt 2: ở các frame giữa, chỉ dò trên vùng cắt nhỏ (3× cỡ mặt, phóng cho mặt ~64 px) quanh vị trí nội suy của từng track, cộng K-1 frame trước lần thấy đầu
@@ -2018,17 +2028,18 @@ async function plDetectRois(opt,prog,rois,o){ // dò trên vùng cắt quanh m�
 async function plDetectFast(opt,prog){
  const K=opt.fast,all=[];for(let f=0;f<S.n;f+=opt.stride)all.push(f);const keysF=all.filter((f,i)=>i%K===0),isKey=new Set(keysF),span=K*opt.stride;
  const R=await plDetect(opt,prog,{frames:keysF,nets:opt.nets,yunet:opt.yunet,stems:opt.stems,cuts:true,label:`Dò cả khung ở ${keysF.length}/${all.length} frame`});
- const t0=performance.now(),o={...opt,lo:Math.min(opt.lo,0.3),hi:0.6,strict:false,stride:span,minLen:1,maxGap:Math.max(2*span,opt.maxGap),linkGap:Math.max(3*span,opt.linkGap)},{T}=plTrack(plFilter(R,o,null).D,keysF,R.cuts,o);
+ const t0=performance.now(),o={...opt,lo:Math.min(opt.lo,0.3),hi:0.6,strict:false,stride:span,minLen:1,maxGap:Math.max(2*span,opt.maxGap),linkGap:Math.max(3*span,opt.linkGap)},{T}=plTrack(plFilter(R,o,null).D,keysF,R.cuts,o,R.cmc);
  const rois=[],put=(f,b)=>{if(f<0||f>=S.n||isKey.has(f)||f%opt.stride)return;if(rois.some(r=>r.f===f&&iou(r,b)>=0.7))return;rois.push({f,x:b.x,y:b.y,w:b.w,h:b.h})};
  for(const t of T){const d=t.d,a0=d[0],e=d.at(-1);if(opt.strict&&!d.some(x=>x.s>=opt.hi))continue; // track chưa có box nào đủ chắc ở frame mốc thì không dò phóng to quanh nó (ảnh phóng to dễ làm vật giống mặt được điểm cao)
   for(let f=a0.f-span+opt.stride;f<a0.f;f+=opt.stride)put(f,a0);for(let f=e.f+opt.stride;f<e.f+span;f+=opt.stride)put(f,e);
   for(let i=0;i+1<d.length;i++){const a=d[i],b=d[i+1];for(let f=a.f+opt.stride;f<b.f;f+=opt.stride){const w=(f-a.f)/(b.f-a.f);put(f,{x:a.x+(b.x-a.x)*w,y:a.y+(b.y-a.y)*w,w:a.w+(b.w-a.w)*w,h:a.h+(b.h-a.h)*w})}}}
  for(const c of R.cuts)for(let f=Math.max(0,c-span);f<=c;f+=opt.stride)rois.push({f,cut:true});
  rois.sort((a,b)=>a.f-b.f||(b.cut?1:0)-(a.cut?1:0));
- const nR=rois.filter(r=>!r.cut).length,r2=rois.length?await plDetectRois(opt,prog,rois,{anchor:true,nets:opt.nets.slice(0,1),yunet:!opt.nets.length,label:`Dò quanh mặt ở ${nR} vùng (các frame giữa)`}):{D:new Map(),ncc:new Map()};
+ const nR=rois.filter(r=>!r.cut).length,r2=rois.length?await plDetectRois(opt,prog,rois,{anchor:true,nets:opt.nets.slice(0,1),yunet:!opt.nets.length,label:`Dò quanh mặt ở ${nR} vùng (các frame giữa)`}):{D:new Map(),ncc:new Map(),sh:new Map()};
  let moved=0,dropped=0;for(const c of [...R.cuts]){let g=-1,mn=2;for(let f=c-span+opt.stride;f<=c;f+=opt.stride){const v=r2.ncc.get(f);if(v!==undefined&&v<mn){mn=v;g=f}}
   if(g<0)continue;R.cuts.delete(c);if(mn<0.5){R.cuts.add(g);if(g!==c)moved++}else dropped++}
  const D=new Map();let add=0;for(const f of all){if(isKey.has(f))D.set(f,R.D.get(f)||[]);else{const L=(r2.D.get(f)||[]).map(b=>({...b,roi:true}));D.set(f,L);add+=L.length}}
+ if(r2.sh.size){const C=new Map();for(const [f,v] of r2.sh)C.set(f,v);R.cmc=C}
  R.D=D;R.frames=all;R.nDet+=add;R.fast={K,keys:keysF.length,of:all.length,rois:nR,cutsDropped:dropped,sec:(performance.now()-t0)/1000};R.sec+=R.fast.sec;return R}
 async function plDetectCasc(opt,prog){
  const R=opt.fast>1?await plDetectFast(opt,prog):await plDetect(opt,prog);if(!opt.heavy)return R;
@@ -2037,21 +2048,24 @@ async function plDetectCasc(opt,prog){
  const a=plFuseInto(R.D,R2.D),rois=plCascRois(R,opt,new Set(per)),b=rois.length?plFuseInto(R.D,(await plDetectRois(opt,prog,rois)).D):{add:0,agree:0};
  R.nDet+=a.add+b.add;R.casc={frames:per.length,of:R.frames.length,rois:rois.length,add:a.add+b.add,agree:a.agree+b.agree,sec:(performance.now()-t0)/1000};R.sec+=R.casc.sec;return R}
 /* lọc box theo ngưỡng / lọc chặt / nhãn đã có. Trả về bản sao, không sửa kết quả dò (để dùng lại cho nhiều cấu hình) */
+const plCover=(b,g)=>{if(iou(b,g)>=0.3)return true;const ix=Math.max(0,Math.min(b.x+b.w,g.x+g.w)-Math.max(b.x,g.x))*Math.max(0,Math.min(b.y+b.h,g.y+g.h)-Math.max(b.y,g.y));return ix>=0.6*b.w*b.h||ix>=0.6*g.w*g.h}; // trùng với box GT (kể cả GT vẽ to / nhỏ hơn)
 function plFilter(R,opt,keep){const D=new Map(),drop={};let nDet=0;
  for(const [f,L] of R.D){const G=keep?(keep.F.get(f)||[]).map(i=>keep.rows[i]):[],out=[];
   if(opt.dropDet&&f>=opt.dropDet[0]&&f<=opt.dropDet[1]){D.set(f,[]);continue} // chỉ để thử nghiệm (PL_DEBUG)
-  for(const b of L){if(b.s<opt.lo)continue;if(G.length&&G.some(g=>iou(b,g)>=0.3))continue;if(opt.strict){const why=plBadBox(b,opt);if(why){drop[why]=(drop[why]||0)+1;continue}}out.push({...b})}
+  for(const b of L){if(b.s<opt.lo)continue;if(G.length&&G.some(g=>plCover(b,g)))continue;if(opt.strict){const why=plBadBox(b,opt);if(why){drop[why]=(drop[why]||0)+1;continue}}out.push({...b})}
   D.set(f,out);nDet+=out.length}
- return {...R,D,nDet,drop}}
+ return {...R,D,nDet,drop,keep}}
 const plKey=opt=>[S.name,S.n,S.w,S.h,opt.yunet,opt.nets.join('+'),opt.heavy||'',opt.fast||1,opt.sz,opt.tiles,opt.stride].join('|');
 async function plDetectCached(opt,prog){ // dùng lại kết quả dò nếu cùng video + bộ dò + cỡ vào + bước quét, và ngưỡng cũ không cao hơn
  const key=plKey(opt);if(PL.cache&&PL.cache.key===key&&PL.cache.R.lo<=opt.lo){prog('Dùng lại kết quả dò lần trước (chỉ ghép track lại)…',1);return {...PL.cache.R,sec:0,reused:true}}
  const R=await plDetectCasc(opt,prog);PL.cache={key,R};return R}
-function plTrack(D,frames,cuts,opt){
- const done=[],act=[];
- const pred=(t,f)=>{const a=t.d.at(-1);if(t.d.length<2)return a;const b=t.d.at(-2),k=Math.min(f-a.f,3*opt.stride)/Math.max(1,a.f-b.f);
-  return {x:a.x+(a.x+a.w/2-b.x-b.w/2)*k,y:a.y+(a.y+a.h/2-b.y-b.h/2)*k,w:a.w,h:a.h}};
- const assign=(T,L,thr)=>{const P=[];T.forEach((t,i)=>{const p=pred(t,L.f);L.d.forEach((d,j)=>{const o=Math.max(iou(p,d),iou(t.d.at(-1),d));if(o>=thr)P.push([o,i,j])})});
+function plTrack(D,frames,cuts,opt,cmc){
+ const done=[],act=[],cam=new Map();{let cx=0,cy=0;for(const f of frames){const v=cmc&&cmc.get(f);if(v){cx+=v[0];cy+=v[1]}cam.set(f,[cx,cy])}}
+ const Wd=d=>{const c=cam.get(d.f)||[0,0];return {x:d.x-c[0],y:d.y-c[1],w:d.w,h:d.h}}; // toạ độ đã bù chuyển động camera
+ const pred=(t,f)=>{const a=Wd(t.d.at(-1));if(t.d.length<2)return a;const n=Math.min(t.d.length,5),b=Wd(t.d.at(-n)),dt=Math.max(1,t.d.at(-1).f-t.d.at(-n).f),k=Math.min(f-t.d.at(-1).f,3*opt.stride);
+  return {x:a.x+(a.x+a.w/2-b.x-b.w/2)/dt*k,y:a.y+(a.y+a.h/2-b.y-b.h/2)/dt*k,w:a.w,h:a.h}}; // vận tốc trung bình trên tối đa 5 lần thấy gần nhất
+ const near=(p,d)=>{const r=d.w/p.w;if(r<0.67||r>1.5)return 0;const m=Math.max(p.w,p.h),dc=Math.hypot(p.x+p.w/2-d.x-d.w/2,p.y+p.h/2-d.y-d.h/2);return dc<0.75*m?0.5*(1-dc/(0.75*m)):0};
+ const assign=(T,L,thr)=>{const P=[];T.forEach((t,i)=>{const p=pred(t,L.f),q=Wd(t.d.at(-1));L.d.forEach((d,j)=>{const w=Wd(d),o=Math.max(iou(p,w),iou(q,w),near(p,w));if(o>=thr)P.push([o,i,j])})});
   P.sort((a,b)=>b[0]-a[0]);const ut=new Set(),ud=new Set();for(const [,i,j] of P){if(ut.has(i)||ud.has(j))continue;ut.add(i);ud.add(j);T[i].d.push(L.d[j])}
   return [T.filter((_,i)=>!ut.has(i)),L.d.filter((_,j)=>!ud.has(j))]};
  let seg=0;
@@ -2063,13 +2077,18 @@ function plTrack(D,frames,cuts,opt){
  done.push(...act);
  const okT=t=>{if(!opt.strict)return t.d.length>=opt.minLen||t.d.some(d=>d.s>=opt.hi+0.1);const hi=t.d.filter(d=>d.s>=opt.hi).length;return hi>=Math.min(2,t.d.length)&&(t.d.length>=opt.minLen||t.d[0].s>=opt.hi+0.15)};
  let T=done.filter(okT);const weak=done.length-T.length;
+ // gộp track trùng: hai track cùng lúc nằm trên một mặt (box chồng nhau ở ≥ 60% số frame chung) -> giữ box điểm cao hơn ở mỗi frame
+ let dups=0;for(let again=true;again;){again=false;
+  for(let i=0;i<T.length&&!again;i++)for(let j=i+1;j<T.length&&!again;j++){const A=new Map(T[i].d.map(d=>[d.f,d]));let sh=0,ov=0;
+   for(const d of T[j].d){const a=A.get(d.f);if(!a)continue;sh++;const ix=Math.max(0,Math.min(a.x+a.w,d.x+d.w)-Math.max(a.x,d.x))*Math.max(0,Math.min(a.y+a.h,d.y+d.h)-Math.max(a.y,d.y));if(iou(a,d)>=0.5||ix>=0.7*Math.min(a.w*a.h,d.w*d.h))ov++}
+   if(sh>=2&&ov>=0.6*sh){for(const d of T[j].d){const a=A.get(d.f);if(!a||d.s>a.s)A.set(d.f,d)}T[i].d=[...A.values()].sort((x,y)=>x.f-y.f);T[i].seg=Math.min(T[i].seg,T[j].seg);T.splice(j,1);dups++;again=true}}}
  // nối đoạn đứt: A kết thúc, B bắt đầu gần đó ngay sau, và chỉ có đúng một cách ghép
  let links=0;for(let again=true;again;){again=false;T.sort((a,b)=>a.d[0].f-b.d[0].f);
   const cand=a=>{const e=a.d.at(-1);return T.filter(b=>{if(b===a||b.seg!==a.seg)return false;const s=b.d[0],g=s.f-e.f;if(g<=0||g>opt.linkGap)return false;
-   const r=s.h/e.h;if(r<0.5||r>2)return false;return Math.hypot(s.x+s.w/2-e.x-e.w/2,s.y+s.h/2-e.y-e.h/2)<=(1+4*g/S.fps)*Math.max(e.w,e.h)})};
+   const r=s.h/e.h;if(r<0.5||r>2)return false;const S2=Wd(s),E2=Wd(e);return Math.hypot(S2.x+S2.w/2-E2.x-E2.w/2,S2.y+S2.h/2-E2.y-E2.h/2)<=(1+4*g/S.fps)*Math.max(e.w,e.h)})};
   const back=b=>T.filter(a=>a!==b&&cand(a).includes(b));
   for(const a of T){const C=cand(a);if(C.length!==1||back(C[0]).length!==1)continue;const b=C[0];(a.links||(a.links=[])).push([a.d.at(-1).f,b.d[0].f],...(b.links||[]));a.d.push(...b.d);T=T.filter(x=>x!==b);links++;again=true;break}}
- return {T,links,weak}}
+ return {T,links,weak,dups}}
 function plAttrs(t,opt){ // thuộc tính tự điền cho từng box của track, làm mượt bằng đa số trong cửa sổ ±3
  const E=1.5,raw=t.d.map(d=>{const e1=[d.lm[0],d.lm[1]],e2=[d.lm[2],d.lm[3]],ed=Math.max(dist(e1,e2),1e-3),ux=(e2[0]-e1[0])/ed,uy=(e2[1]-e1[1])/ed;
   const off=Math.abs((d.lm[4]-(e1[0]+e2[0])/2)*ux+(d.lm[5]-(e1[1]+e2[1])/2)*uy)/ed,prof=ed<0.2*d.w;
@@ -2133,6 +2152,7 @@ async function plFlow(R,opt,prog){
  const toC=(j,b)=>({x:(b.x-j.rx)*j.k,y:(b.y-j.ry)*j.k,w:b.w*j.k,h:b.h*j.k}),toF=(j,b)=>({x:b.x/j.k+j.rx,y:b.y/j.k+j.ry,w:b.w/j.k,h:b.h/j.k});
  const run=(j,from,to,box)=>{const out=new Map(),dir=to>from?1:-1;let b=toC(j,box);for(let f=from;f!==to+dir;f+=dir){if(f===from)continue;const nb=plLKStep(cv,j.img.get(f-dir),j.img.get(f),j.cw,j.ch,b);if(!nb)break;b=nb;out.set(f,toF(j,b))}return out};
  const occ=new Map();R.T.forEach(t=>t.d.forEach(d=>{if(!occ.has(d.f))occ.set(d.f,[]);occ.get(d.f).push({t,d})}));
+ if(R.keep)for(const [f,ix] of R.keep.F){if(!occ.has(f))occ.set(f,[]);for(const i of ix)occ.get(f).push({t:null,d:R.keep.rows[i],gt:true})}
  const mk=(src,b,f)=>{const s=b.w/src.w,cx=src.x+src.w/2,cy=src.y+src.h/2,nx=b.x+b.w/2,ny=b.y+b.h/2;
   return {f,x:clamp(b.x,0,S.w),y:clamp(b.y,0,S.h),w:Math.min(b.w,S.w-clamp(b.x,0,S.w)),h:Math.min(b.h,S.h-clamp(b.y,0,S.h)),s:src.s,sh:src.sh,n:src.n,pt:src.pt,flow:true,lm:src.lm.map((v,i)=>i%2?(v-cy)*s+ny:(v-cx)*s+nx)}};
  let nGap=0,nExt=0,nDis=0;const add=new Map();
@@ -2146,7 +2166,7 @@ async function plFlow(R,opt,prog){
    nGap++;if(dis)nDis++;const g=j.f1-j.f0-1;
    if(g>=opt.gapWarn)j.t.flowNotes.push({f:j.f0+1,kind:used<g/2?'Nội suy dài':dis?'Theo dấu ảnh không khớp':'Lấp bằng theo dấu ảnh',detail:used<g/2?`Bộ dò không thấy mặt ở ${g} frame (f${j.f0+1}–f${j.f1-1}) và theo dấu ảnh chỉ bám được ${used} frame, phần còn lại đang được nội suy. Mặt có thể đã khuất hoặc rời khung: kiểm tra, không có mặt thì xoá đoạn này.`:`Bộ dò không thấy mặt ở ${g} frame (f${j.f0+1}–f${j.f1-1}); ${used} frame được lấp bằng theo dấu ảnh, ${g-used} frame nội suy${dis?`, ${dis} frame hai chiều theo dấu lệch nhau`:''}. Kiểm tra box có bám đúng mặt không.`})}
   else{const M=j.kind==='fwd'?run(j,j.f0,j.f1,j.a):run(j,j.f1,j.f0,j.a),fs=[...M.keys()].sort((a,b)=>j.kind==='fwd'?a-b:b-a),keep=[];
-   for(const f of fs){const b=M.get(f);if((occ.get(f)||[]).some(o=>o.t!==j.t&&iou(o.d,b)>=0.4))break;keep.push(mk(j.a,b,f))}
+   for(const f of fs){const b=M.get(f);if((occ.get(f)||[]).some(o=>o.t!==j.t&&(o.gt?plCover(b,o.d):iou(o.d,b)>=0.4)))break;keep.push(mk(j.a,b,f))}
    if(keep.length<2)continue;L.push(...keep);nExt++;
    if(keep.length>=opt.gapWarn){const fr=keep.map(x=>x.f),a=Math.min(...fr),b=Math.max(...fr);j.t.flowNotes.push({f:a,kind:'Kéo dài bằng theo dấu ảnh',detail:`Track được kéo dài ${keep.length} frame (f${a}–f${b}) ${j.kind==='fwd'?'sau khi':'trước khi'} bộ dò thấy mặt, có thể là lúc mặt quay đi / mờ / bị che. Kiểm tra box còn bám đúng đầu người đó không; sai thì cắt bớt.`})}}}
  for(const [t,L] of add){if(!L.length)continue;const have=new Set(t.d.map(d=>d.f));t.d.push(...L.filter(x=>!have.has(x.f)));t.d.sort((a,b)=>a.f-b.f)}
@@ -2168,7 +2188,7 @@ function plReidMerge(T,opt){
  const seen=new Set(),sugg=[];for(const p of pairs()){if(p.s<opt.reidSuggest)break;if(seen.has(p.a)||seen.has(p.b))continue;seen.add(p.a);seen.add(p.b);sugg.push(p)}
  return {mode:opt.reid,emb:G.length,tracks:T.length,merged,events,sugg}}
 async function plLink(R,opt,prog){
- const {T,links,weak}=plTrack(R.D,R.frames,R.cuts,opt);T.forEach((t,i)=>t.d.forEach(d=>{d.pt=i}));R.T=T;R.links=links;R.weak=weak;R.reid=null;
+ const {T,links,weak,dups}=plTrack(R.D,R.frames,R.cuts,opt,R.cmc);T.forEach((t,i)=>t.d.forEach(d=>{d.pt=i}));R.T=T;R.links=links;R.weak=weak;R.dups=dups;R.reid=null;
  if(opt.reid==='off'||T.length<2)return;
  if(!PL.pool||!(PL.pool.stems||[]).includes('w600k_mbf')){if(PL.pool)PL.pool.close();PL.pool=new DetPool();await PL.pool.init(['w600k_mbf'],prog,opt.threads,opt.bk)}
  const pick=t=>{const ok=d=>d.s>=Math.max(0.5,opt.hi-0.1)&&Math.min(d.w,d.h)>=opt.reidMinPx&&d.sh>=opt.blur2&&plPose(d)<opt.reidPose;
@@ -2184,7 +2204,7 @@ async function plLink(R,opt,prog){
  R.reid=plReidMerge(T,opt);
  if(opt.debug)console.log('SIMS '+JSON.stringify(R.reid.events.map(e=>+e.s.toFixed(3)))+' sugg '+JSON.stringify(R.reid.sugg.map(x=>+x.s.toFixed(3))))}
 function plBuild(R,opt){
- const T=R.T||plTrack(R.D,R.frames,R.cuts,opt).T,links=R.links??0,issues=[],out=[],last=R.frames.at(-1),mg=0.04*Math.min(S.w,S.h),RE=R.reid;
+ const T=R.T||plTrack(R.D,R.frames,R.cuts,opt,R.cmc).T,links=R.links??0,issues=[],out=[],last=R.frames.at(-1),mg=0.04*Math.min(S.w,S.h),RE=R.reid;
  const add=(f,id,kind,detail,frames)=>issues.push({f,id,kind,detail,grp:'L',frames});
  const near=d=>d.x<=mg||d.y<=mg||d.x+d.w>=S.w-mg||d.y+d.h>=S.h-mg;let nBox=0,nIgn=0;const idOf=new Map(T.map(t=>[t,S.nextId++]));
  for(const t of T){const d=t.d,A=plAttrs(t,opt),id=idOf.get(t),brk=[];for(let i=1;i<d.length;i++)if(d[i].pt!==d[i-1].pt)brk.push(i);
@@ -2208,9 +2228,9 @@ function plBuild(R,opt){
  for(const s of RE?.sugg||[]){if(!idOf.has(s.a)||!idOf.has(s.b))continue;const [x,y]=s.a.d[0].f<=s.b.d[0].f?[s.a,s.b]:[s.b,s.a];
   add(y.d[0].f,idOf.get(y),'Có thể cùng người',`Khuôn mặt giống #${idOf.get(x)} (độ giống ${s.s.toFixed(2)}, hai track không xuất hiện cùng lúc). Nếu cùng một người: chọn một track rồi bấm J để gộp.`)}
  issues.sort((a,b)=>a.f-b.f||a.id-b.id);
- return {tracks:out,issues,links,nBox,nIgn,casc:R.casc||null,fast:R.fast||null,backend:R.backend||'',reader:R.reader,flow:R.flow||null,drop:R.drop||{},weak:R.weak||0,reused:!!R.reused,cuts:[...R.cuts],nDet:R.nDet,sec:R.sec,frames:R.frames.length,opt,detName:opt.detName||'YuNet',reid:RE?{mode:RE.mode,emb:RE.emb,merged:RE.merged,sugg:RE.sugg.length}:null,when:new Date().toLocaleString()}}
+ return {tracks:out,issues,links,dups:R.dups||0,nBox,nIgn,casc:R.casc||null,fast:R.fast||null,backend:R.backend||'',reader:R.reader,flow:R.flow||null,drop:R.drop||{},weak:R.weak||0,reused:!!R.reused,cuts:[...R.cuts],nDet:R.nDet,sec:R.sec,frames:R.frames.length,opt,detName:opt.detName||'YuNet',reid:RE?{mode:RE.mode,emb:RE.emb,merged:RE.merged,sugg:RE.sugg.length}:null,when:new Date().toLocaleString()}}
 function renderPL(r){const kp=(v,l)=>`<div><b>${v}</b><span>${l}</span></div>`,kinds=[...new Set(r.issues.map(i=>i.kind))];
- let h=`<div class="evk">${kp(r.tracks.length,'track mặt đã tạo')}${kp(r.nBox,'mặt-frame')}${kp(r.nIgn,'track mặt nhỏ (Ignore)')}${kp(r.links,'đoạn đứt đã nối')}${r.reid?kp(r.reid.merged,'lần nối bằng khuôn mặt (ReID)'):''}${r.opt.strict?kp(Object.values(r.drop).reduce((a,b)=>a+b,0)+' / '+r.weak,'box / track yếu đã loại'):''}${kp(r.cuts.length,'chuyển cảnh')}${kp(r.issues.length,'điểm cần xem')}${kp(r.reused?'dùng lại':Math.round(r.sec)+' s',`${r.frames} frame đã quét`)}</div>
+ let h=`<div class="evk">${kp(r.tracks.length,'track mặt đã tạo')}${kp(r.nBox,'mặt-frame')}${kp(r.nIgn,'track mặt nhỏ (Ignore)')}${kp(r.links,'đoạn đứt đã nối')}${r.dups?kp(r.dups,'track trùng đã gộp'):''}${r.attached?kp(r.attached,'đoạn nối vào track có sẵn'):''}${r.reid?kp(r.reid.merged,'lần nối bằng khuôn mặt (ReID)'):''}${r.opt.strict?kp(Object.values(r.drop).reduce((a,b)=>a+b,0)+' / '+r.weak,'box / track yếu đã loại'):''}${kp(r.cuts.length,'chuyển cảnh')}${kp(r.issues.length,'điểm cần xem')}${kp(r.reused?'dùng lại':Math.round(r.sec)+' s',`${r.frames} frame đã quét`)}</div>
  <div class="gtbox"><b>Việc còn lại của bạn</b><ul>
   <li>Bộ dò: <b>${esc(r.detName)}</b>${r.backend?` · chạy model bằng ${esc(r.backend)}`:''}${r.fast?` · chế độ nhanh: dò cả khung ở ${r.fast.keys}/${r.fast.of} frame, ${r.fast.rois} vùng quanh mặt ở các frame giữa`:''}${r.casc?` · SCRFD-10G: cả khung ở ${r.casc.frames}/${r.casc.of} frame + ${r.casc.rois} vùng quanh mặt (${Math.round(r.casc.sec)} s), thêm ${r.casc.add} box mới, xác nhận ${r.casc.agree} box`:''}${r.reader?` · đọc frame: ${esc(r.reader)}`:''}${r.flow?` · theo dấu ảnh: lấp ${r.flow.gap} chỗ hổng, kéo dài ${r.flow.ext} đầu track`:''}${r.reid?` · ReID: ${r.reid.emb} track có khuôn mặt đủ rõ để so, ${r.reid.merged} lần tự nối, ${r.reid.sugg} gợi ý cùng người`:''}.</li>
   <li>Bấm <kbd>]</kbd> để đi lần lượt qua ${r.issues.length} điểm cần xem (${kinds.map(k=>`${esc(k)}: ${r.issues.filter(i=>i.kind===k).length}`).join(' · ')||'không có'}). Track sai: <kbd>Del</kbd>. Hai track cùng một người: chọn một track rồi <kbd>J</kbd>.</li>
@@ -2256,10 +2276,10 @@ async function plTune(prog){
  const LO=[0.25,0.3,0.35,0.4,0.5,0.6],HI=[0.5,0.6,0.65,0.7,0.8];
  const R0=await plDetectCached({...base,lo:LO[0]},prog);prog('Đang thử các bộ ngưỡng…',1);
  const rows=[];for(const strict of [true,false])for(const lo of LO)for(const hi of HI){if(hi<lo)continue;
-  const o={...base,lo,hi,strict},R=plFilter(R0,o,null),{T}=plTrack(R.D,R.frames,R.cuts,o);T.forEach((t,i)=>t.d.forEach(d=>{d.pt=i}));
+  const o={...base,lo,hi,strict},R=plFilter(R0,o,null),{T}=plTrack(R.D,R.frames,R.cuts,o,R.cmc);T.forEach((t,i)=>t.d.forEach(d=>{d.pt=i}));
   rows.push({lo,hi,strict,...plScore(T,ref,o.stride)});await new Promise(r=>setTimeout(r,0))}
  const cur={lo:base.lo,hi:base.hi,strict:base.strict};let curRow=rows.find(r=>r.lo===cur.lo&&r.hi===cur.hi&&r.strict===cur.strict);
- if(!curRow&&base.lo>=LO[0]){const R=plFilter(R0,base,null),{T}=plTrack(R.D,R.frames,R.cuts,base);T.forEach((t,i)=>t.d.forEach(d=>{d.pt=i}));curRow={...cur,...plScore(T,ref,base.stride)}}
+ if(!curRow&&base.lo>=LO[0]){const R=plFilter(R0,base,null),{T}=plTrack(R.D,R.frames,R.cuts,base,R.cmc);T.forEach((t,i)=>t.d.forEach(d=>{d.pt=i}));curRow={...cur,...plScore(T,ref,base.stride)}}
  return {rows,cur:curRow,nGT:ref.n,nTrackGT:ref.ids.size,det:base.detName,frames:R0.frames.length,sec:R0.sec,reused:R0.reused}}
 function renderTune(r,pri){const key=pri==='bal'?'F1':'F2',rs=[...r.rows].sort((a,b)=>Math.round((b[key]-a[key])*1000)||a.junk-b.junk||a.frag-b.frag||(b.strict-a.strict)||b.lo-a.lo||b.hi-a.hi),pc=v=>(v*100).toFixed(1)+'%';
  const row=(x,tag)=>`<tr${tag?' style="font-weight:600"':''}><td>${tag||''}</td><td>${x.lo}</td><td>${x.hi}</td><td>${x.strict?'bật':'tắt'}</td><td>${pc(x.R)}</td><td>${pc(x.P)}</td><td>${x.junk}</td><td>${x.frag}</td><td>${x.nT}</td><td>${(x[key]*100).toFixed(1)}</td><td>${tag==='hiện tại'?'':`<button class="btn" data-use="${x.lo},${x.hi},${x.strict?1:0}">Dùng</button>`}</td></tr>`;
@@ -2270,6 +2290,22 @@ function renderTune(r,pri){const key=pri==='bal'?'F1':'F2',rs=[...r.rows].sort((
  ${r.cur?row(r.cur,'hiện tại'):''}${rs.slice(0,12).map((x,i)=>row(x,i===0?'tốt nhất':'')).join('')}</table></div>`}
 function wireTune(){const o=$('#plOut');if(!o||!PL.tune)return;const sp=$('#tunePri');if(sp)sp.onchange=()=>{PL.tunePri=sp.value;o.innerHTML=renderTune(PL.tune,PL.tunePri);wireTune()};
  o.querySelectorAll('[data-use]').forEach(b=>b.onclick=()=>{const [lo,hi,st]=b.dataset.use.split(',');$('#plLo').value=lo;$('#plHi').value=hi;$('#plStrict').checked=st==='1';plSave(plReadOpt());toast(`Đã chọn điểm thấp ${lo}, điểm chắc ${hi}, lọc chặt ${st==='1'?'bật':'tắt'} (được nhớ cho lần sau). Bấm Chạy để gán nhãn.`,5000)})}
+/* chế độ "chỉ thêm": track máy nằm ngay trước / sau một track GT (cùng nhãn, không trùng thời gian, vị trí và cỡ khớp, chỉ một ứng viên mỗi bên)
+   thì nối vào chính track GT đó thay vì tạo ID mới. Trả số lần nối; ghi chú vào hàng đợi. */
+function plAttachGT(res,opt){const gts=S.tracks.filter(t=>t.label===opt.label&&!res.tracks.includes(t)&&t.type==='rect');if(!gts.length)return 0;
+ const box=(t,f)=>{const s=stateAt(t,f);if(!s)return null;const [[a,b],[c,d]]=s.pts;return {x:Math.min(a,c),y:Math.min(b,d),w:Math.abs(c-a),h:Math.abs(d-b)}};
+ const ends=t=>{const sp=spans(t);return sp.length?[sp[0][0],sp.at(-1)[1]-1]:null};
+ const ok=(e,fe,s,fs)=>{const g=fs-fe;if(g<1||g>opt.linkGap)return false;const r=Math.sqrt(s.w*s.h/(e.w*e.h));if(r<0.4||r>2.5)return false;
+  return Math.hypot(s.x+s.w/2-e.x-e.w/2,s.y+s.h/2-e.y-e.h/2)<=(1+4*g/S.fps)*Math.max(e.w,e.h,s.w,s.h)};
+ let n=0;for(const m of [...res.tracks]){const em=ends(m);if(!em)continue;const C=[];
+  for(const g of gts){if(pvOverlap(g,m))continue;const eg=ends(g);if(!eg)continue;
+   if(eg[1]<em[0]&&ok(box(g,eg[1]),eg[1],box(m,em[0]),em[0]))C.push(g);else if(em[1]<eg[0]&&ok(box(m,em[1]),em[1],box(g,eg[0]),eg[0]))C.push(g)}
+  if(C.length!==1)continue;const g=C[0];
+  for(const k of keys(m)){const q=m.kf[k];if(q.outside&&g.kf[k]&&!g.kf[k].outside)continue;g.kf[k]=q}
+  const after=em[0]>ends(g)[0];res.issues=res.issues.filter(is=>!(is.id===m.id&&is.kind===(after?'Bắt đầu giữa khung':'Kết thúc giữa khung')));
+  res.tracks=res.tracks.filter(t=>t!==m);for(const is of res.issues)if(is.id===m.id)is.id=g.id;
+  res.issues.push({f:em[0],id:g.id,kind:'Nối vào track có sẵn',detail:`Mặt máy tìm thêm ở f${em[0]}–f${em[1]} nằm ngay ${em[0]>ends(g)[0]?'sau':'trước'} track #${g.id} có sẵn nên được nối vào #${g.id} thay vì tạo ID mới. Kiểm tra đúng cùng người; box máy có thể khác kiểu box GT (chặt hơn / rộng hơn).`,grp:'L'});n++}
+ res.issues.sort((a,b)=>a.f-b.f||a.id-b.id);res.attached=n;return n}
 function showPL(){
  if(!src)return toast('Hãy mở video trước');if(playing)togglePlay();
  const o={det:'sc500+yu',sz:960,reid:'merge',threads:0,...(PL.opt||plLoad()||{stride:1,lo:0.4,hi:0.65,tiles:false,mode:'add',minPx:14,longSide:1280,strict:true})};
@@ -2305,8 +2341,8 @@ function showPL(){
  $('#plRun').onclick=async()=>{if(PL.running)return;const opt=plReadOpt();PL.opt=opt;plSave(opt);
   PL.running=true;PL.cancel=false;$('#plRun').disabled=true;$('#plStop').hidden=false;$('#plProg').hidden=false;const keepF=S.frame;
   const prog=(m,p)=>{const t=$('#plProgTxt');if(t)t.textContent=m;const b=document.querySelector('#plProg .pbar i');if(b&&p!=null)b.style.width=(p*100).toFixed(1)+'%'};
-  try{prog('Đang tải OpenCV.js (~10 MB)…',0);const R0=await plDetectCached(opt,prog),R=plFilter(R0,opt,opt.mode==='add'?gtData(opt.label):null);await plLink(R,opt,prog);if(!R.T){const r=plTrack(R.D,R.frames,R.cuts,opt);R.T=r.T;R.links=r.links;R.weak=r.weak;R.T.forEach((t,i)=>t.d.forEach(d=>{d.pt=i}))}await plFlow(R,opt,prog);prog('Đang ghép track…',1);const res=plBuild(R,opt);
-   pushUndo();if(opt.mode==='replace')S.tracks=S.tracks.filter(t=>t.label!==opt.label);S.tracks.push(...res.tracks);PL.res=res;PV.chk=null;pvClear();GT.issues=res.issues;GT.cur=-1;GT.hl=null;sel=null;
+  try{prog('Đang tải OpenCV.js (~10 MB)…',0);const R0=await plDetectCached(opt,prog),R=plFilter(R0,opt,opt.mode==='add'?gtData(opt.label):null);await plLink(R,opt,prog);if(!R.T){const r=plTrack(R.D,R.frames,R.cuts,opt,R.cmc);R.T=r.T;R.links=r.links;R.weak=r.weak;R.T.forEach((t,i)=>t.d.forEach(d=>{d.pt=i}))}await plFlow(R,opt,prog);prog('Đang ghép track…',1);const res=plBuild(R,opt);
+   pushUndo();if(opt.mode==='replace')S.tracks=S.tracks.filter(t=>t.label!==opt.label);if(opt.mode==='add')plAttachGT(res,opt);S.tracks.push(...res.tracks);PL.res=res;PV.chk=null;pvClear();GT.issues=res.issues;GT.cur=-1;GT.hl=null;sel=null;
    renderLabels();changed();renderGTSide();if($('#plOut')){$('#plOut').innerHTML=renderPL(res);wirePL()}toast(`Đã tạo ${res.tracks.length} track mặt · ${res.issues.length} điểm cần xem`,4000)}
   catch(e){toast(e.message==='Đã hủy'?'Đã dừng, chưa thay đổi nhãn':'Lỗi khi tự gán nhãn: '+e.message,9000)}
   finally{PL.running=false;if(PL.pool){PL.pool.close();PL.pool=null}if($('#plRun')){$('#plRun').disabled=false;$('#plStop').hidden=true;$('#plProg').hidden=true}goFrame(keepF)}}}
