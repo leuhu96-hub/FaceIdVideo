@@ -101,6 +101,25 @@ Video mở từ Đánh giá folder **không tự lưu nhãn**, để không ghi 
 
 Dành cho bài toán "chọn một người, che mặt mọi người còn lại".
 
+### Tự gán nhãn (máy gán trước, người chỉ duyệt)
+
+Nút **Tự gán nhãn** → **Chạy**. Mọi thứ chạy trong trình duyệt, không cần cài model nào khác:
+
+1. YuNet ngưỡng thấp chạy trên mọi frame. Bật **Bắt mặt nhỏ** để chạy thêm trên 4 ô phóng to 2× (chậm hơn khoảng 4–5 lần).
+2. Các box được ghép thành track (box điểm cao ghép trước, điểm thấp ghép sau), cắt track ở chỗ chuyển cảnh, nối các đoạn đứt gần nhau khi chỉ có một cách ghép.
+3. Track được rút gọn thành keyframe; các thuộc tính **cắt ở mép**, **Ignore** (mặt nhỏ), **độ mờ**, **góc mặt** được điền sẵn. "Bị che" và "nhận ra được" không tự điền.
+4. Những chỗ cần người xem được đưa vào danh sách nghi vấn (`[` `]`): track điểm thấp cần xác nhận, track bắt đầu / kết thúc giữa khung hình, đoạn nội suy dài, đoạn đã nối.
+
+Việc của người gán nhãn:
+
+- Đi qua hàng đợi bằng `]`. Track sai: `Del`. Hai track của cùng một người: chọn một track, bấm `J` rồi chọn track kia.
+- Xem lướt cả video một lần để tìm **mặt không có box nào**. Máy không thấy thì hàng đợi không nhắc; đây là loại lỗi làm số lộ mặt đẹp giả.
+- Bấm `M` cho người được chọn, sửa thuộc tính sai, rồi **Chuẩn nhãn** và **Xuất**.
+
+"Nhãn đã có: giữ" chỉ thêm mặt chưa có box, nên chạy lại sau khi đã sửa tay vẫn an toàn. `Ctrl+Z` bỏ toàn bộ kết quả một lần chạy. Muốn tìm thêm các track cùng người bị tách, chạy **Đánh giá GT** nhóm C với SFace rồi gộp bằng `J`.
+
+Lưu ý: GT gán trước bằng YuNet sẽ thiên về những mặt YuNet thấy được. Nếu pipeline cần đánh giá cũng dùng YuNet, bước xem lướt tìm mặt sót càng quan trọng.
+
 ### Gán nhãn
 
 Chọn một đối tượng, mục **Thuộc tính che mặt** hiện ở thanh bên:
@@ -191,7 +210,7 @@ Model .onnx không có trong repo: YuNet và SFace tải ở [opencv_zoo](https:
 
 ## Phím tắt chính
 
-R vẽ box · F / D frame sau / trước (Shift: ±10) · O outside · K keyframe · B ẩn/hiện box model · `[` / `]` nghi vấn GT · `,` / `.` đoạn model sai · `;` / `'` đoạn lộ mặt · U C V Y G X I thuộc tính che mặt · M người được chọn · Ctrl+Z hoàn tác · `?` xem tất cả.
+R vẽ box · F / D frame sau / trước (Shift: ±10) · O outside · K keyframe · B ẩn/hiện box model · `[` / `]` nghi vấn GT · `,` / `.` đoạn model sai · `;` / `'` đoạn lộ mặt · U C V Y G X I thuộc tính che mặt · M người được chọn · J gộp track · Ctrl+Z hoàn tác · `?` xem tất cả.
 
 ## Lưu ý
 

@@ -153,6 +153,7 @@ tr.gA td:first-child{border-left:3px solid #fcc419}tr.gQ td:first-child{border-l
   <button class="btn" id="gtBtn" title="Đánh giá chất lượng ground truth">Đánh giá GT</button>
   <button class="btn" id="btBtn" title="Đánh giá cả folder video + GT (+ kết quả model)">Đánh giá folder</button>
   <span class="sep"></span>
+  <button class="btn primary" id="plBtn" title="Máy tìm mặt, ghép track, điền thuộc tính; bạn chỉ duyệt lại">Tự gán nhãn</button>
   <button class="btn" id="pvChkBtn" title="Soát nhãn theo quy tắc gán nhãn che mặt (thuộc tính, ignore, person ID, người được chọn)">Chuẩn nhãn</button>
   <button class="btn" id="pvEvBtn" title="Đo tỷ lệ lộ mặt: box model = vùng bị che, so với GT">Đánh giá che mặt</button>
   <button class="btn icon" id="helpBtn" title="Phím tắt">?</button>
@@ -311,8 +312,9 @@ curLabel=S.labels[0]?.id;
 let pT;function persist(){if(S.batch)return;clearTimeout(pT);pT=setTimeout(()=>{try{if(S.name&&src?.kind==='video')store.videos[S.name]={w:S.w,h:S.h,fps:S.fps,tracks:S.tracks,targets:S.targets||[]};localStorage.setItem(KEY,JSON.stringify({labels:S.labels,nextLabel:S.nextLabel,nextId:S.nextId,videos:store.videos}))}catch(e){}},500)}
 
 /* ---------- undo ---------- */
-function pushUndo(){undoSt.push(JSON.stringify(S.tracks));if(undoSt.length>200)undoSt.shift();redoSt=[];updBtns()}
-function swap(a,b){const u=a.pop();if(u===undefined)return;b.push(JSON.stringify(S.tracks));S.tracks=JSON.parse(u);if(!selTrack())sel=null;draft=null;changed()}
+const undoSnap=()=>JSON.stringify({t:S.tracks,g:S.targets||[]}),undoLoad=u=>{const o=JSON.parse(u);S.tracks=o.t;S.targets=o.g};
+function pushUndo(){undoSt.push(undoSnap());if(undoSt.length>200)undoSt.shift();redoSt=[];updBtns()}
+function swap(a,b){const u=a.pop();if(u===undefined)return;b.push(undoSnap());undoLoad(u);if(!selTrack())sel=null;draft=null;changed()}
 const undo=()=>swap(undoSt,redoSt),redo=()=>swap(redoSt,undoSt);
 function updBtns(){$('#undoBtn').disabled=!undoSt.length;$('#redoBtn').disabled=!redoSt.length}
 
@@ -619,6 +621,7 @@ addEventListener('keydown',e=>{
   case 'enter':if(draft)finishPolygon();break;
   case 'delete':case 'backspace':e.preventDefault();if(draft?.type==='polygon'){draft.pts.pop();if(!draft.pts.length)draft=null;hint();render()}else delSel();break;
   case 'u':pvCycle('blur');break;case 'c':pvCycle('occ');break;case 'v':pvCycle('pose');break;case 'y':pvCycle('ident');break;
+  case 'j':showMerge();break;
   case 'g':pvCycle('indirect');break;case 'x':pvCycle('trunc');break;case 'i':pvCycle('ignore');break;case 'm':pvToggleTarget();break;
   case 'h':{const t=selTrack();if(t){t.hidden=!t.hidden;changed()}break}
   case 'l':{const t=selTrack();if(t){t.locked=!t.locked;changed()}break}
@@ -746,7 +749,7 @@ function showHelp(){
   ['K','Bật/tắt keyframe của đối tượng đang chọn'],['O','Outside: đối tượng biến mất từ frame này (bấm lại để hiện lại)'],['Q / E','Nhảy tới keyframe trước / sau'],
   ['1 – 9','Chọn nhãn (đổi luôn nhãn đối tượng đang chọn)'],['Enter / double-click','Đóng polygon'],['Esc','Hủy vẽ / bỏ chọn'],['Del','Xóa cả track'],
   ['Mũi tên (khi đã chọn)','Dịch đối tượng 1px (Shift: 10px), tạo keyframe'],['Kéo góc / cạnh box','Resize (Shift: giữ tỉ lệ). Có thể resize ngay cả khi đang ở công cụ vẽ'],['Alt + mũi tên','Đổi chiều rộng / cao box 1px (Shift: 10px)'],['H / L','Ẩn / khóa'],['[ / ]','Nghi vấn GT trước / sau (sau khi chạy Đánh giá GT)'],['B','Ẩn / hiện box model'],[', / .','Đoạn model sai trước / sau (sau khi chạy Đánh giá model)'],['Ctrl+Z / Ctrl+Y','Hoàn tác / làm lại'],
-  ['U / C / V / Y','Thuộc tính che mặt của đối tượng đang chọn: độ mờ / bị che / góc mặt / nhận ra được (bấm để đổi vòng)'],['G / X / I','Bật/tắt: gián tiếp (gương, màn hình, ảnh) / cắt ở mép / Ignore'],['M','Đánh dấu ★ người được chọn (mặt không bị che)'],["; / '",'Đoạn lộ mặt trước / sau (sau khi chạy Đánh giá che mặt)'],
+  ['U / C / V / Y','Thuộc tính che mặt của đối tượng đang chọn: độ mờ / bị che / góc mặt / nhận ra được (bấm để đổi vòng)'],['G / X / I','Bật/tắt: gián tiếp (gương, màn hình, ảnh) / cắt ở mép / Ignore'],['M','Đánh dấu ★ người được chọn (mặt không bị che)'],["; / '",'Đoạn lộ mặt trước / sau (sau khi chạy Đánh giá che mặt)'],['J','Gộp một track khác (cùng người, không xuất hiện cùng lúc) vào track đang chọn'],
   ['Lăn chuột, chụm 2 ngón','Zoom'],['Kéo vùng trống, chuột giữa','Di chuyển khung nhìn'],['0','Vừa khung'],['Double-click cạnh polygon','Thêm đỉnh'],['Alt + click đỉnh','Xóa đỉnh']];
  openModal('Cách dùng & phím tắt',`<div class="note"><b>Quy trình track:</b> ở frame đầu, vẽ đối tượng → tua tới frame sau, kéo/chỉnh đối tượng cho khớp (tự tạo keyframe ◆) → các frame ở giữa được nội suy tuyến tính. Khi đối tượng ra khỏi khung hình, bấm <b>Outside</b> (O). Timeline phía dưới: mỗi hàng là một track, ◆ là keyframe của track đang chọn.</div>
  <table class="keys">${rows.map(r=>`<tr><td><kbd>${r[0]}</kbd></td><td>${r[1]}</td></tr>`).join('')}</table>
@@ -1662,7 +1665,7 @@ function pvSet(k,v){const t=selTrack();if(!t)return toast('Chọn một đối t
  else{const cur=attrAt(t,f),q=ensureKey(t,f);q.a={...cur,[k]:v}}
  changed()}
 function pvCycle(k){const t=selTrack();if(!t)return toast('Chọn một đối tượng trước');const a=attrAt(t,S.frame);pvSet(k,PV_ENUM[k]?(a[k]+1)%PV_ENUM[k].length:!a[k])}
-function pvToggleTarget(){const t=selTrack();if(!t)return toast('Chọn một đối tượng trước');const p=pid(t),T=S.targets||(S.targets=[]),i=T.indexOf(p);
+function pvToggleTarget(){const t=selTrack();if(!t)return toast('Chọn một đối tượng trước');pushUndo();const p=pid(t),T=S.targets||(S.targets=[]),i=T.indexOf(p);
  if(i>=0)T.splice(i,1);else T.push(p);pvClear();changed();toast(i>=0?`Person ${p} không còn là người được chọn`:`★ Person ${p} là người được chọn: mặt người này không bị che`)}
 function pvTag(t){if(t.type==='points')return '';const a=attrAt(t,S.frame),L=[];if(t.person!=null&&t.person!==t.id)L.push('P'+t.person);if(isTarget(t))L.push('★');
  if(a.blur)L.push('mờ'+a.blur);if(a.occ)L.push('che'+a.occ);if(a.pose)L.push(a.pose===1?'nghiêng':'ngang');if(a.ident)L.push(a.ident===1?'?':'✗');
@@ -1674,6 +1677,7 @@ function pvSide(){const el=$('#pvSide');if(!el)return;const t=selTrack();if(!t||
   <label class="chk" title="Người được chọn: mặt người này KHÔNG bị che (phím M)"><input type="checkbox" id="pvTgt" ${isTarget(t)?'checked':''}>★ Người được chọn <kbd>M</kbd></label></div>`;
  for(const k of Object.keys(PV_ENUM))h+=`<div class="pvrow"><span>${PV_NAME[k]} <kbd>${PV_HOT[k]}</kbd></span><span class="seg">${PV_ENUM[k].map((n,i)=>`<button data-k="${k}" data-v="${i}"${a[k]===i?' class="on"':''}>${n}</button>`).join('')}</span></div>`;
  h+=`<div class="mdrow" style="margin-top:6px">${PV_BOOL.map(k=>`<label class="chk"><input type="checkbox" data-k="${k}" ${a[k]?'checked':''}>${PV_NAME[k]} <kbd>${PV_HOT[k]}</kbd></label>`).join('')}</div>
+  <div class="mdrow"><button class="btn" id="pvMergeBtn" title="Gộp một track khác của cùng người vào track này (J)">Gộp track… <kbd>J</kbd></button></div>
   <div class="mdrow"><label class="chk" title="Tắt: thay đổi có hiệu lực từ frame này trở đi (tạo keyframe). Bật: đổi cho mọi frame của track"><input type="checkbox" id="pvWhole" ${PV.whole?'checked':''}>Áp cho cả track</label></div>
   <div class="note2">${on?(PV.whole?'Đang đổi cho mọi frame của track.':'Thay đổi có hiệu lực từ frame '+S.frame+' trở đi.'):'Đối tượng không có ở frame này: thay đổi áp cho cả track.'}</div>`;
  el.innerHTML=h}
@@ -1865,6 +1869,144 @@ function exportPVJsonl(){ // mỗi dòng một frame; dòng đầu là meta (ng�
  for(let f=0;f<S.n;f++)L.push(JSON.stringify({sample_id:`${stem}/frame-${pad(f)}`,object:(F.get(f)||[]).sort((a,b)=>a.track_id-b.track_id)}));
  return L.join('\n')}
 
+/* =====================================================================
+   TỰ GÁN NHÃN (pre-label) – chạy hoàn toàn trong trình duyệt
+   1. YuNet ngưỡng thấp trên mọi frame (tuỳ chọn: thêm 4 ô phóng to 2× để bắt mặt nhỏ), ghi nhận chuyển cảnh.
+   2. Ghép thành track kiểu ByteTrack (box điểm cao ghép trước, điểm thấp ghép sau), nối các đoạn đứt gần nhau.
+   3. Rút gọn thành keyframe, tự điền thuộc tính: cắt mép, ignore (mặt nhỏ), độ mờ, góc mặt.
+   4. Xếp hàng đợi những chỗ cần người xem (danh sách nghi vấn, phím [ ]).
+   Người gán nhãn chỉ duyệt: Del xoá track sai, J gộp 2 track cùng người, sửa thuộc tính bằng phím.
+   ===================================================================== */
+const PL={res:null,running:false,cancel:false,opt:null};
+async function plDetect(opt,prog){
+ await loadCV();const cv=window.cv;await ensureYunet(cv);
+ const det=new cv.FaceDetectorYN('yunet.onnx','',new cv.Size(320,320),opt.lo,0.3,5000);
+ const full=mkCanvas(S.w,S.h),fg=full.getContext('2d',{willReadFrequently:true}),c64=mkCanvas(64,64),g64=c64.getContext('2d',{willReadFrequently:true}),sm=mkCanvas(160,90),gsm=sm.getContext('2d',{willReadFrequently:true});
+ const run=(mat,k,ox,oy)=>{det.setInputSize(new cv.Size(mat.cols,mat.rows));const out=new cv.Mat();det.detect(mat,out);const res=[];
+  for(let i=0;i<out.rows;i++){const r=out.data32F.subarray(i*15,i*15+15),lm=[];for(let j=4;j<14;j++)lm.push(r[j]/k+(j%2?oy:ox));res.push({x:r[0]/k+ox,y:r[1]/k+oy,w:r[2]/k,h:r[3]/k,s:r[14],lm})}
+  out.delete();return res};
+ const frames=[];for(let f=0;f<S.n;f+=opt.stride)frames.push(f);
+ const keep=opt.mode==='add'?gtData(opt.label):null,D=new Map(),cuts=new Set();let prevN=null,nDet=0;const t0=performance.now();
+ try{for(let n=0;n<frames.length;n++){if(PL.cancel)throw new Error('Đã hủy');const f=frames[n];
+  if(n%2===0){const el=(performance.now()-t0)/1000;prog(`Đang tìm mặt: frame ${f} (${n+1}/${frames.length})`+(n>5?` · còn khoảng ${Math.ceil(el/n*(frames.length-n))} giây`:''),n/frames.length)}
+  await src.seek(f);fg.drawImage(src.image,0,0,S.w,S.h);
+  gsm.drawImage(src.image,0,0,160,90);{const g=grayOf(gsm.getImageData(0,0,160,90)),[m,sd]=meanStd(g),nm=g.map(v=>(v-m)/(sd+1e-6));if(prevN){let c=0;for(let i=0;i<g.length;i++)c+=nm[i]*prevN[i];if(c/g.length<0.5)cuts.add(f)}prevN=nm}
+  const rgba=cv.matFromImageData(fg.getImageData(0,0,S.w,S.h)),bgr=new cv.Mat();cv.cvtColor(rgba,bgr,cv.COLOR_RGBA2BGR);rgba.delete();
+  let L;{const ls=Math.max(S.w,S.h);if(ls>opt.longSide){const k=opt.longSide/ls,tmp=new cv.Mat();cv.resize(bgr,tmp,new cv.Size(Math.round(S.w*k),Math.round(S.h*k)));L=run(tmp,k,0,0);tmp.delete()}else L=run(bgr,1,0,0)}
+  if(opt.tiles){const tw=Math.min(S.w,Math.round(S.w*0.6)),th=Math.min(S.h,Math.round(S.h*0.6));
+   for(const x0 of [0,S.w-tw])for(const y0 of [0,S.h-th]){const roi=bgr.roi(new cv.Rect(x0,y0,tw,th)),rs=new cv.Mat();cv.resize(roi,rs,new cv.Size(tw*2,th*2));
+    for(const d of run(rs,2,x0,y0)){const cutL=x0>0&&d.x-x0<3,cutT=y0>0&&d.y-y0<3,cutR=x0+tw<S.w&&x0+tw-d.x-d.w<3,cutB=y0+th<S.h&&y0+th-d.y-d.h<3;if(!(cutL||cutT||cutR||cutB))L.push(d)}
+    roi.delete();rs.delete()}}
+  bgr.delete();L=nms(L,0.4);
+  const G=keep?(keep.F.get(f)||[]).map(i=>keep.rows[i]):[],out=[];
+  for(const d of L){const x0=clamp(d.x,0,S.w),y0=clamp(d.y,0,S.h),x1=clamp(d.x+d.w,0,S.w),y1=clamp(d.y+d.h,0,S.h);if(x1-x0<3||y1-y0<3)continue;
+   const b={f,x:x0,y:y0,w:x1-x0,h:y1-y0,s:d.s,lm:d.lm};if(G.some(g=>iou(b,g)>=0.3))continue;
+   g64.drawImage(full,b.x,b.y,b.w,b.h,0,0,64,64);b.sh=sharp64(grayOf(g64.getImageData(0,0,64,64)));out.push(b)}
+  D.set(f,out);nDet+=out.length;await new Promise(r=>setTimeout(r,0))}}
+ finally{det.delete()}
+ return {D,frames,cuts,nDet,sec:(performance.now()-t0)/1000}}
+function plTrack(D,frames,cuts,opt){
+ const done=[],act=[];
+ const pred=(t,f)=>{const a=t.d.at(-1);if(t.d.length<2)return a;const b=t.d.at(-2),k=Math.min(f-a.f,3*opt.stride)/Math.max(1,a.f-b.f);
+  return {x:a.x+(a.x+a.w/2-b.x-b.w/2)*k,y:a.y+(a.y+a.h/2-b.y-b.h/2)*k,w:a.w,h:a.h}};
+ const assign=(T,L,thr)=>{const P=[];T.forEach((t,i)=>{const p=pred(t,L.f);L.d.forEach((d,j)=>{const o=Math.max(iou(p,d),iou(t.d.at(-1),d));if(o>=thr)P.push([o,i,j])})});
+  P.sort((a,b)=>b[0]-a[0]);const ut=new Set(),ud=new Set();for(const [,i,j] of P){if(ut.has(i)||ud.has(j))continue;ut.add(i);ud.add(j);T[i].d.push(L.d[j])}
+  return [T.filter((_,i)=>!ut.has(i)),L.d.filter((_,j)=>!ud.has(j))]};
+ let seg=0;
+ for(const f of frames){if(cuts.has(f)){done.push(...act.splice(0));seg++}
+  const L=D.get(f)||[],hi=L.filter(d=>d.s>=opt.hi),lo=L.filter(d=>d.s<opt.hi);
+  const [restT,restHi]=assign(act,{f,d:hi},0.2),[,restLo]=assign(restT,{f,d:lo},0.3);
+  for(const d of [...restHi,...restLo])act.push({d:[d],seg});
+  for(let i=act.length-1;i>=0;i--)if(f-act[i].d.at(-1).f>opt.maxGap)done.push(...act.splice(i,1))}
+ done.push(...act);
+ let T=done.filter(t=>t.d.length>=opt.minLen||t.d.some(d=>d.s>=opt.hi+0.1));
+ // nối đoạn đứt: A kết thúc, B bắt đầu gần đó ngay sau, và chỉ có đúng một cách ghép
+ let links=0;for(let again=true;again;){again=false;T.sort((a,b)=>a.d[0].f-b.d[0].f);
+  const cand=a=>{const e=a.d.at(-1);return T.filter(b=>{if(b===a||b.seg!==a.seg)return false;const s=b.d[0],g=s.f-e.f;if(g<=0||g>opt.linkGap)return false;
+   const r=s.h/e.h;if(r<0.5||r>2)return false;return Math.hypot(s.x+s.w/2-e.x-e.w/2,s.y+s.h/2-e.y-e.h/2)<=(1+4*g/S.fps)*Math.max(e.w,e.h)})};
+  const back=b=>T.filter(a=>a!==b&&cand(a).includes(b));
+  for(const a of T){const C=cand(a);if(C.length!==1||back(C[0]).length!==1)continue;const b=C[0];(a.links||(a.links=[])).push([a.d.at(-1).f,b.d[0].f],...(b.links||[]));a.d.push(...b.d);T=T.filter(x=>x!==b);links++;again=true;break}}
+ return {T,links}}
+function plAttrs(t,opt){ // thuộc tính tự điền cho từng box của track, làm mượt bằng đa số trong cửa sổ ±3
+ const E=1.5,raw=t.d.map(d=>{const e1=[d.lm[0],d.lm[1]],e2=[d.lm[2],d.lm[3]],ed=Math.max(dist(e1,e2),1e-3),ux=(e2[0]-e1[0])/ed,uy=(e2[1]-e1[1])/ed;
+  const off=Math.abs((d.lm[4]-(e1[0]+e2[0])/2)*ux+(d.lm[5]-(e1[1]+e2[1])/2)*uy)/ed,prof=ed<0.2*d.w;
+  return {blur:d.sh<opt.blur2?2:d.sh<opt.blur1?1:0,pose:prof||off>0.55?2:off>0.22?1:0,trunc:d.x<=E||d.y<=E||d.x+d.w>=S.w-E||d.y+d.h>=S.h-E,ignore:Math.min(d.w,d.h)<opt.minPx}});
+ const maj=(k,i)=>{const c=new Map();for(let j=Math.max(0,i-3);j<=Math.min(raw.length-1,i+3);j++)c.set(raw[j][k],(c.get(raw[j][k])||0)+1);let best=raw[i][k],bn=0;for(const [v,n] of c)if(n>bn||(n===bn&&v===raw[i][k])){best=v;bn=n}return best};
+ return raw.map((_,i)=>({...PV_DEF,blur:maj('blur',i),pose:maj('pose',i),trunc:raw[i].trunc,ignore:maj('ignore',i)}))}
+function plKeys(d,stride){ // chỉ giữ keyframe khi nội suy tuyến tính lệch quá ngưỡng
+ const fits=(i,j)=>{const a=d[i],b=d[j];for(let m=i+1;m<j;m++){const c=d[m],r=(c.f-a.f)/(b.f-a.f),tol=Math.max(1.5,0.06*Math.min(c.w,c.h));
+   const x=a.x+(b.x-a.x)*r,y=a.y+(b.y-a.y)*r,w=a.w+(b.w-a.w)*r,h=a.h+(b.h-a.h)*r;if(Math.abs(x-c.x)>tol||Math.abs(y-c.y)>tol||Math.abs(x+w-c.x-c.w)>tol||Math.abs(y+h-c.y-c.h)>tol)return false}return true};
+ const K=[0];let i=0;while(i<d.length-1){let j=i+1;while(j+1<d.length&&d[j+1].f-d[i].f<=30*stride&&fits(i,j+1))j++;K.push(j);i=j}return K}
+function plBuild(R,opt){
+ const {T,links}=plTrack(R.D,R.frames,R.cuts,opt),issues=[],out=[],last=R.frames.at(-1),mg=0.04*Math.min(S.w,S.h);
+ const add=(f,id,kind,detail,frames)=>issues.push({f,id,kind,detail,grp:'L',frames});
+ const near=d=>d.x<=mg||d.y<=mg||d.x+d.w>=S.w-mg||d.y+d.h>=S.h-mg;let nBox=0,nIgn=0;
+ for(const t of T){const d=t.d,A=plAttrs(t,opt),K=new Set(plKeys(d,opt.stride)),chg=new Set([0]);
+  for(let i=1;i<d.length;i++)if(JSON.stringify(A[i])!==JSON.stringify(A[i-1])){chg.add(i);K.add(i)}
+  const tr={id:S.nextId++,type:'rect',label:opt.label,kf:{},hidden:false,locked:false};
+  for(const i of [...K].sort((a,b)=>a-b)){const o=d[i];tr.kf[o.f]={pts:[[r2(o.x),r2(o.y)],[r2(o.x+o.w),r2(o.y+o.h)]],outside:false};if(chg.has(i))tr.kf[o.f].a=A[i]}
+  const e=d.at(-1),end=Math.min(e.f+opt.stride,S.n);if(end<S.n)tr.kf[end]={pts:clone(tr.kf[e.f].pts),outside:true};out.push(tr);nBox+=end-d[0].f;if(A.every(a=>a.ignore))nIgn++;
+  const ms=d.reduce((s,x)=>s+x.s,0)/d.length;
+  if(ms<opt.hi||d.length<5)add(d[0].f,tr.id,'Cần xác nhận mặt',`Điểm trung bình ${ms.toFixed(2)}, thấy ở ${d.length} frame (f${d[0].f}–f${e.f}). Không phải mặt thì bấm Del.`);
+  if(d[0].f>R.frames[0]&&!R.cuts.has(d[0].f)&&!near(d[0]))add(d[0].f,tr.id,'Bắt đầu giữa khung',`Mặt xuất hiện giữa khung hình ở f${d[0].f}. Lùi vài frame: nếu mặt đã có từ trước (quay đi, bị che), kéo dài track về trước.`);
+  const nx=e.f+opt.stride;if(e.f<last&&!R.cuts.has(nx)&&!near(e))add(e.f,tr.id,'Kết thúc giữa khung',`Track dừng giữa khung hình ở f${e.f}. Tiến vài frame: nếu mặt vẫn còn (quay đi, bị che, mờ), kéo dài track.`);
+  for(let i=1;i<d.length;i++){const g=d[i].f-d[i-1].f-1;if(g>=opt.gapWarn&&g>=opt.stride){const fr=[];for(let f=d[i-1].f+1;f<d[i].f;f++)fr.push(f);
+   add(d[i-1].f+1,tr.id,(t.links||[]).some(l=>l[0]===d[i-1].f)?'Đã nối 2 đoạn':'Nội suy dài',`Không thấy mặt ở ${g} frame (f${d[i-1].f+1}–f${d[i].f-1}), box đang được nội suy. Kiểm tra box có bám đúng mặt và có đúng cùng một người không.`,fr)}}}
+ issues.sort((a,b)=>a.f-b.f||a.id-b.id);
+ return {tracks:out,issues,links,nBox,nIgn,cuts:[...R.cuts],nDet:R.nDet,sec:R.sec,frames:R.frames.length,opt,when:new Date().toLocaleString()}}
+function renderPL(r){const kp=(v,l)=>`<div><b>${v}</b><span>${l}</span></div>`,kinds=[...new Set(r.issues.map(i=>i.kind))];
+ let h=`<div class="evk">${kp(r.tracks.length,'track mặt đã tạo')}${kp(r.nBox,'mặt-frame')}${kp(r.nIgn,'track mặt nhỏ (Ignore)')}${kp(r.links,'đoạn đứt đã nối')}${kp(r.cuts.length,'chuyển cảnh')}${kp(r.issues.length,'điểm cần xem')}${kp(Math.round(r.sec)+' s',`${r.frames} frame đã quét`)}</div>
+ <div class="gtbox"><b>Việc còn lại của bạn</b><ul>
+  <li>Bấm <kbd>]</kbd> để đi lần lượt qua ${r.issues.length} điểm cần xem (${kinds.map(k=>`${esc(k)}: ${r.issues.filter(i=>i.kind===k).length}`).join(' · ')||'không có'}). Track sai: <kbd>Del</kbd>. Hai track cùng một người: chọn một track rồi <kbd>J</kbd>.</li>
+  <li>Xem lướt cả video một lần ở tốc độ thường để tìm <b>mặt không có box nào</b> (quay nghiêng hẳn, quá tối, bị che nhiều). Máy không thấy thì hàng đợi cũng không nhắc; đây là lỗi nguy hiểm nhất. Gặp thì vẽ box bằng <kbd>R</kbd>.</li>
+  <li>Đánh dấu ★ người được chọn bằng <kbd>M</kbd>. Sửa thuộc tính máy điền sai bằng <kbd>U</kbd> <kbd>C</kbd> <kbd>V</kbd> <kbd>Y</kbd> <kbd>G</kbd> <kbd>X</kbd> <kbd>I</kbd>. "Bị che" và "nhận ra được" máy không tự điền.</li>
+  <li>Cuối cùng bấm <b>Chuẩn nhãn</b> rồi <b>Xuất</b>. Muốn bỏ toàn bộ kết quả tự gán: <kbd>Ctrl+Z</kbd>.</li></ul></div>`;
+ h+=`<h4>Điểm cần xem (${r.issues.length})</h4>`+(r.issues.length?`<div class="gtt"><table><tr><th>Frame</th><th>ID</th><th>Loại</th><th>Chi tiết</th></tr>${r.issues.map((i,n)=>`<tr class="gti" data-li="${n}"><td>${i.f}</td><td>#${i.id}</td><td>${esc(i.kind)}</td><td>${esc(i.detail)}</td></tr>`).join('')}</table></div>`:'<div class="mut">Không có.</div>');
+ return h}
+function wirePL(){const o=$('#plOut');if(!o)return;o.querySelectorAll('[data-li]').forEach(tr=>tr.onclick=()=>{GT.issues=PL.res.issues;closeModal();gotoIssue(+tr.dataset.li)})}
+function showPL(){
+ if(!src)return toast('Hãy mở video trước');if(playing)togglePlay();
+ const o=PL.opt||{stride:1,lo:0.3,hi:0.6,tiles:false,mode:'add',minPx:14,longSide:1280};
+ openModal('Tự gán nhãn mặt',`<div class="gtcfg"><div class="mdrow" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+  <label title="1 = mọi frame (nên dùng cho GT). Lớn hơn thì nhanh hơn, các frame giữa được nội suy">Quét mỗi <input class="num" id="plStride" type="number" min="1" max="30" value="${o.stride}"> frame</label>
+  <label title="Box có điểm từ mức này trở lên đều được giữ lại để ghép track. Thấp = ít sót, nhiều box sai cần xoá">Điểm thấp ≥ <input class="num" id="plLo" type="number" step="0.05" min="0.1" max="0.9" value="${o.lo}"></label>
+  <label title="Box từ mức này trở lên được coi là chắc chắn">Điểm chắc ≥ <input class="num" id="plHi" type="number" step="0.05" min="0.2" max="0.95" value="${o.hi}"></label>
+  <label title="Mặt có cạnh ngắn nhỏ hơn mức này được tự đặt Ignore">Ignore mặt &lt; <input class="num" id="plMin" type="number" min="0" max="64" value="${o.minPx}"> px</label>
+  <label class="chk" title="Chạy thêm trên 4 ô phóng to 2×. Bắt được mặt nhỏ ở xa, chậm hơn khoảng 4–5 lần"><input type="checkbox" id="plTiles" ${o.tiles?'checked':''}>Bắt mặt nhỏ (chậm hơn)</label>
+  <label>Nhãn đã có <select class="btn" id="plMode"><option value="add"${o.mode==='add'?' selected':''}>giữ, chỉ thêm mặt chưa có box</option><option value="replace"${o.mode==='replace'?' selected':''}>xoá track mặt cũ rồi gán lại</option></select></label>
+  <button class="btn primary" id="plRun">Chạy</button><button class="btn" id="plStop" hidden>Dừng</button></div>
+  <div class="note">Máy tìm mặt bằng YuNet ở mọi frame, ghép thành track, tự điền cắt mép / Ignore / độ mờ / góc mặt, rồi xếp hàng những chỗ cần bạn xem. Mọi thứ chạy trong trình duyệt, video không rời khỏi máy. Lần đầu phải tải OpenCV.js (~10 MB).</div>
+  <div id="plProg" hidden><div class="pbar"><i></i></div><span class="mut" id="plProgTxt"></span></div></div>
+  <div id="plOut">${PL.res?renderPL(PL.res):''}</div>`);
+ $('#modal').classList.add('wide');wirePL();$('#plStop').onclick=()=>{PL.cancel=true};
+ $('#plRun').onclick=async()=>{if(PL.running)return;const lo=clamp(+$('#plLo').value||0.3,0.1,0.9),stride=clamp(Math.round(+$('#plStride').value)||1,1,30);
+  const opt={stride,lo,hi:Math.max(lo,clamp(+$('#plHi').value||0.6,0.2,0.95)),tiles:$('#plTiles').checked,mode:$('#plMode').value,minPx:Math.max(0,+$('#plMin').value||0),longSide:1280,blur1:60,blur2:25,
+   maxGap:Math.max(2*stride,Math.round(S.fps*0.4)),linkGap:Math.max(3*stride,Math.round(S.fps*1.5)),minLen:3,gapWarn:Math.max(4,Math.round(S.fps/5))};
+  let lab=S.labels.find(l=>/^(face|mặt|mat)$/i.test(l.name));if(!lab){lab={id:S.nextLabel++,name:'face',color:PALETTE[S.labels.length%PALETTE.length]};S.labels.push(lab)}opt.label=lab.id;PL.opt=opt;
+  PL.running=true;PL.cancel=false;$('#plRun').disabled=true;$('#plStop').hidden=false;$('#plProg').hidden=false;const keepF=S.frame;
+  const prog=(m,p)=>{const t=$('#plProgTxt');if(t)t.textContent=m;const b=document.querySelector('#plProg .pbar i');if(b&&p!=null)b.style.width=(p*100).toFixed(1)+'%'};
+  try{prog('Đang tải OpenCV.js (~10 MB)…',0);const R=await plDetect(opt,prog);prog('Đang ghép track…',1);const res=plBuild(R,opt);
+   pushUndo();if(opt.mode==='replace')S.tracks=S.tracks.filter(t=>t.label!==opt.label);S.tracks.push(...res.tracks);PL.res=res;PV.chk=null;pvClear();GT.issues=res.issues;GT.cur=-1;GT.hl=null;sel=null;
+   renderLabels();changed();renderGTSide();if($('#plOut')){$('#plOut').innerHTML=renderPL(res);wirePL()}toast(`Đã tạo ${res.tracks.length} track mặt · ${res.issues.length} điểm cần xem`,4000)}
+  catch(e){toast(e.message==='Đã hủy'?'Đã dừng, chưa thay đổi nhãn':'Lỗi khi tự gán nhãn: '+e.message,5000)}
+  finally{PL.running=false;if($('#plRun')){$('#plRun').disabled=false;$('#plStop').hidden=true;$('#plProg').hidden=true}goFrame(keepF)}}}
+/* ---------- gộp 2 track của cùng một người ---------- */
+function pvOverlap(a,b){const A=spans(a),B=spans(b);return A.some(([s,e])=>B.some(([u,v])=>s<v&&u<e))}
+function pvMerge(aId,bId){const a=S.tracks.find(t=>t.id===aId),b=S.tracks.find(t=>t.id===bId);if(!a||!b||a===b)return false;
+ if(a.type!==b.type)return toast('Hai track khác loại hình'),false;if(pvOverlap(a,b))return toast(`#${a.id} và #${b.id} cùng xuất hiện ở một số frame nên không thể là một track. Nếu là mặt và đầu của cùng người, hãy đặt chung Person.`,5000),false;
+ pushUndo();const ks=keys(b);
+ if(pvHasAttr(a)||pvHasAttr(b)){ // mỗi lần xuất hiện mang theo thuộc tính của chính nó
+  for(const [s] of spans(b)){const q=b.kf[s];if(q)q.a=attrAt(b,s)}for(const k of ks)if(b.kf[k].a)b.kf[k].a={...PV_DEF,...(b.a||{}),...b.kf[k].a};
+  for(const [s] of spans(a)){const q=a.kf[s];if(q&&!q.a)q.a=attrAt(a,s)}}
+ for(const k of ks){const q=b.kf[k];if(q.outside&&a.kf[k]&&!a.kf[k].outside)continue;a.kf[k]=q}
+ S.tracks=S.tracks.filter(t=>t!==b);if((S.targets||[]).includes(pid(b))&&!S.tracks.some(t=>pid(t)===pid(b))){S.targets=S.targets.filter(p=>p!==pid(b));if(!S.targets.includes(pid(a)))S.targets.push(pid(a))}
+ sel=a.id;pvClear();changed();toast(`Đã gộp #${b.id} vào #${a.id}`);return true}
+function showMerge(){const t=selTrack();if(!t)return toast('Chọn một track trước, rồi bấm J để gộp track khác vào');if(playing)togglePlay();
+ const C=S.tracks.filter(x=>x!==t&&x.type===t.type&&x.label===t.label&&!pvOverlap(t,x)).map(x=>{const sp=spans(x);return {x,s:sp[0]?.[0]??0,e:(sp.at(-1)?.[1]??1)-1}}).sort((a,b)=>a.s-b.s);
+ const me=spans(t);openModal(`Gộp track khác vào #${t.id}`,`<div class="note">#${t.id} có ở f${me[0]?.[0]??'?'}–f${(me.at(-1)?.[1]??1)-1}. Chỉ liệt kê track cùng nhãn và không xuất hiện cùng lúc với #${t.id}. Bấm một dòng để gộp (Ctrl+Z để hoàn tác).</div>`+
+  (C.length?`<div class="gtt"><table><tr><th>Track</th><th>Frame</th><th>Person</th><th></th></tr>${C.map(c=>`<tr class="gti" data-m="${c.x.id}"><td>#${c.x.id}</td><td>f${c.s}–f${c.e}</td><td>${pid(c.x)}${isTarget(c.x)?' ★':''}</td><td><a href="#" data-see="${c.s}">xem</a></td></tr>`).join('')}</table></div>`:'<div class="mut">Không có track nào gộp được.</div>'));
+ $('#mBody').querySelectorAll('[data-m]').forEach(tr=>tr.onclick=e=>{if(e.target.dataset.see!==undefined){e.preventDefault();closeModal();sel=+tr.dataset.m;goFrame(+e.target.dataset.see);changed(false);return}if(pvMerge(t.id,+tr.dataset.m))closeModal()})}
+
 /* ---------- wiring ---------- */
 $('#mdShow').onchange=e=>{MD.show=e.target.checked;render()};$('#mdLive').onchange=e=>{MD.live=e.target.checked;maybeDetect()};
 $('#mdThr').oninput=e=>{MD.thr=+e.target.value;$('#mdThrO').textContent=MD.thr.toFixed(2);updModelSide();render()};
@@ -1873,9 +2015,10 @@ $('#mdFile').onclick=()=>$('#mdIn').click();$('#mdIn').onchange=async e=>{const 
 $('#mdEvalBtn').onclick=showEval;$('#evOpen').onclick=showEval;$('#evPrev').onclick=()=>evGoto(EV.cur-1);$('#evNext').onclick=()=>evGoto(EV.cur+1);
 $('#btBtn').onclick=showBatch;
 $('#mdClear').onclick=()=>{mdReset(false,1);MD.src='';updModelSide();render()};$('#mdAdd').onclick=addModelToGT;
-$('#gtBtn').onclick=showGT;$('#gtOpen').onclick=()=>PV.chk&&GT.issues===PV.chk.issues?showChk():showGT();
+$('#gtBtn').onclick=showGT;$('#gtOpen').onclick=()=>PL.res&&GT.issues===PL.res.issues?showPL():PV.chk&&GT.issues===PV.chk.issues?showChk():showGT();
+$('#plBtn').onclick=showPL;
 $('#pvChkBtn').onclick=showChk;$('#pvEvBtn').onclick=showPV;$('#pvOpen').onclick=showPV;$('#pvPrev').onclick=()=>pvGoto(PV.cur-1);$('#pvNext').onclick=()=>pvGoto(PV.cur+1);
-$('#pvSide').onclick=e=>{const b=e.target.closest('button[data-k]');if(b)pvSet(b.dataset.k,+b.dataset.v)};
+$('#pvSide').onclick=e=>{if(e.target.closest('#pvMergeBtn'))return showMerge();const b=e.target.closest('button[data-k]');if(b)pvSet(b.dataset.k,+b.dataset.v)};
 $('#pvSide').onchange=e=>{const el=e.target;el.blur();
  if(el.id==='pvWhole'){PV.whole=el.checked;pvSide();return}
  if(el.id==='pvTgt')return pvToggleTarget();
